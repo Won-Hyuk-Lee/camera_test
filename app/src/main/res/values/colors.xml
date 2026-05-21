@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="recording_red">#E53935</color>
+    <color name="idle_gray">#9E9E9E</color>
+    <color name="ic_launcher_background">#1E88E5</color>
+</resources>
