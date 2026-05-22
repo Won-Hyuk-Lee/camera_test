@@ -54,6 +54,27 @@ class SettingsFragment : Fragment() {
         binding.btnRequestPermissions.setOnClickListener {
             permissionLauncher.launch(PermissionHelper.REQUIRED_PERMISSIONS)
         }
+
+        binding.btnDisableNotification.setOnClickListener {
+            try {
+                val intent = Intent().apply {
+                    action = Settings.ACTION_APP_NOTIFICATION_SETTINGS
+                    putExtra(Settings.EXTRA_APP_PACKAGE, requireContext().packageName)
+                }
+                startActivity(intent)
+            } catch (e: Exception) {
+                try {
+                    val intent = Intent().apply {
+                        action = "android.settings.APP_NOTIFICATION_SETTINGS"
+                        putExtra("app_package", requireContext().packageName)
+                        putExtra("app_uid", requireContext().applicationInfo.uid)
+                    }
+                    startActivity(intent)
+                } catch (ex: Exception) {
+                    Toast.makeText(requireContext(), "설정 화면으로 이동할 수 없습니다.", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
     }
 
     override fun onResume() {

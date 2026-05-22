@@ -342,6 +342,24 @@ class CameraController(private val context: Context) {
         applyOptionsLive()
     }
 
+    // --- 노출 보정 (AE) 제어 API ---
+    fun getMinExposureIndex(): Int =
+        camera?.cameraInfo?.exposureState?.exposureCompensationRange?.lower ?: 0
+
+    fun getMaxExposureIndex(): Int =
+        camera?.cameraInfo?.exposureState?.exposureCompensationRange?.upper ?: 0
+
+    fun getCurrentExposureIndex(): Int =
+        camera?.cameraInfo?.exposureState?.exposureCompensationIndex ?: 0
+
+    fun setExposureIndex(index: Int) {
+        val min = getMinExposureIndex()
+        val max = getMaxExposureIndex()
+        val clamped = index.coerceIn(min, max)
+        camera?.cameraControl?.setExposureCompensationIndex(clamped)
+    }
+
+
     // --- 촬영 무음 유틸리티 ---
     private fun muteSystemSound() {
         if (!isMuteSound) return

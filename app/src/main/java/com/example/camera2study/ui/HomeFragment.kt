@@ -42,6 +42,24 @@ class HomeFragment : Fragment() {
             }
         }
 
+        binding.cardFastRecord.setOnClickListener {
+            if (PermissionHelper.allGranted(requireContext())) {
+                val fragment = CameraFragment().apply {
+                    arguments = Bundle().apply {
+                        putBoolean("EXTRA_AUTO_START", true)
+                    }
+                }
+                navigateTo(fragment)
+            } else {
+                Toast.makeText(
+                    requireContext(),
+                    "필수 권한이 누락되었습니다. 권한 및 설정 센터에서 허용해주세요.",
+                    Toast.LENGTH_LONG
+                ).show()
+                navigateTo(SettingsFragment())
+            }
+        }
+
         binding.cardPrivateVault.setOnClickListener {
             navigateTo(PrivateVaultFragment())
         }

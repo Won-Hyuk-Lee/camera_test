@@ -238,6 +238,44 @@
                             android:textStyle="bold" />
                     </LinearLayout>
 
+                    <View
+                        android:layout_width="match_parent"
+                        android:layout_height="1dp"
+                        android:background="#1AFFFFFF"
+                        android:layout_marginVertical="12dp" />
+
+                    <!-- 100% 무알림 위장 촬영 (시스템 설정 연동) -->
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical">
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="🤫 100% 무알림 위장 촬영 팁 (권장)"
+                            android:textColor="#FFC107"
+                            android:textSize="13sp"
+                            android:textStyle="bold" />
+
+                        <TextView
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="4dp"
+                            android:text="포그라운드 서비스 알림도 완벽히 소거하여 화면과 상단바에 흔적을 남기지 않으려면, 아래 버튼을 눌러 앱 알림 권한을 '허용 안 함'으로 직접 비활성화하세요."
+                            android:textColor="#B3FFFFFF"
+                            android:textSize="11sp" />
+
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/btnDisableNotification"
+                            style="@style/Widget.Material3.Button.TonalButton"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="8dp"
+                            android:text="🤫 알림 노출 완전히 끄기"
+                            android:textSize="12sp" />
+                    </LinearLayout>
+
                     <com.google.android.material.button.MaterialButton
                         android:id="@+id/btnRequestPermissions"
                         style="@style/Widget.Material3.Button"

@@ -78,13 +78,30 @@ class CameraFragment : Fragment() {
             setupQuickControls()
             updateThumbnail()
 
-            // 초기 모드 동기화 (기본 사진모드로 시작하되 녹화 중이면 비디오 동기화)
-            if (controller.isRecording()) {
+            // 마지막 카메라 세팅 복원
+            restoreCameraSettings()
+
+            // 자동 촬영 시작 (빠른 녹화 유입 시)
+            val autoStart = arguments?.getBoolean("EXTRA_AUTO_START", false) ?: false
+            if (autoStart) {
                 setVideoModeUi()
-                syncRecordingUi(true)
+                // 0.5초 대기 후 레코딩 시작 (초기화 안정성 확보)
+                Handler(Looper.getMainLooper()).postDelayed({
+                    if (::controller.isInitialized && !controller.isRecording()) {
+                        controller.resetRepeatCount()
+                        controller.startRecording()
+                    }
+                }, 500L)
             } else {
-                setPhotoModeUi()
+                // 초기 모드 동기화 (기본 사진모드로 시작하되 녹화 중이면 비디오 동기화)
+                if (controller.isRecording()) {
+                    setVideoModeUi()
+                    syncRecordingUi(true)
+                } else {
+                    setPhotoModeUi()
+                }
             }
+
         }
 
         override fun onServiceDisconnected(name: android.content.ComponentName?) {
@@ -226,10 +243,14 @@ class CameraFragment : Fragment() {
                 else "${"%.1f".format(lens.focalLength)}mm"
                 isCheckable = true
                 isChecked = lens.cameraId == controller.activeCameraId()
-                setOnClickListener { controller.selectBackLens(lens.cameraId) }
+                setOnClickListener {
+                    controller.selectBackLens(lens.cameraId)
+                    saveCameraSettings()
+                }
             }
             binding.lensChipGroup.addView(chip)
         }
+
     }
 
     private fun updateLensIndicator(cameraId: String?) {
@@ -259,12 +280,22 @@ class CameraFragment : Fragment() {
         binding.sliderZoom.addOnChangeListener { _, value, fromUser ->
             if (fromUser) {
                 controller.setZoomRatio(value)
+                saveCameraSettings()
             }
         }
 
-        binding.btnZoom05.setOnClickListener { controller.setZoomRatio(0.5f) }
-        binding.btnZoom10.setOnClickListener { controller.setZoomRatio(1.0f) }
-        binding.btnZoom20.setOnClickListener { controller.setZoomRatio(2.0f) }
+        binding.btnZoom06.setOnClickListener {
+            controller.setZoomRatio(0.6f)
+            saveCameraSettings()
+        }
+        binding.btnZoom10.setOnClickListener {
+            controller.setZoomRatio(1.0f)
+            saveCameraSettings()
+        }
+        binding.btnZoom20.setOnClickListener {
+            controller.setZoomRatio(2.0f)
+            saveCameraSettings()
+        }
     }
 
     private fun updateZoomUi(current: Float, max: Float) {
@@ -272,9 +303,47 @@ class CameraFragment : Fragment() {
         binding.sliderZoom.valueTo = max
         binding.sliderZoom.value = current.coerceIn(binding.sliderZoom.valueFrom, max)
         
-        binding.btnZoom05.setTextColor(if (current <= 0.6f) Color.parseColor("#FFC107") else Color.WHITE)
+        binding.btnZoom06.setTextColor(if (current <= 0.7f) Color.parseColor("#FFC107") else Color.WHITE)
         binding.btnZoom10.setTextColor(if (current > 0.9f && current < 1.2f) Color.parseColor("#FFC107") else Color.WHITE)
         binding.btnZoom20.setTextColor(if (current >= 1.9f && current < 2.2f) Color.parseColor("#FFC107") else Color.WHITE)
+    }
+
+
+    private val exposureFadeRunnable = Runnable {
+        binding.sliderExposure.visibility = View.GONE
+    }
+    private val handler = Handler(Looper.getMainLooper())
+
+    private fun setupExposureSlider() {
+        if (!::controller.isInitialized) return
+        val min = controller.getMinExposureIndex()
+        val max = controller.getMaxExposureIndex()
+        val current = controller.getCurrentExposureIndex()
+
+        if (min == 0 && max == 0) return
+
+        binding.sliderExposure.max = max - min
+        binding.sliderExposure.progress = current - min
+
+        binding.sliderExposure.setOnSeekBarChangeListener(object : android.widget.SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(seekBar: android.widget.SeekBar?, progress: Int, fromUser: Boolean) {
+                if (fromUser && ::controller.isInitialized) {
+                    val targetIndex = progress + min
+                    controller.setExposureIndex(targetIndex)
+                    
+                    handler.removeCallbacks(exposureFadeRunnable)
+                    handler.postDelayed(exposureFadeRunnable, 3000L)
+                }
+            }
+
+            override fun onStartTrackingTouch(seekBar: android.widget.SeekBar?) {
+                handler.removeCallbacks(exposureFadeRunnable)
+            }
+
+            override fun onStopTrackingTouch(seekBar: android.widget.SeekBar?) {
+                handler.postDelayed(exposureFadeRunnable, 3000L)
+            }
+        })
     }
 
     @SuppressLint("ClickableViewAccessibility")
@@ -283,6 +352,12 @@ class CameraFragment : Fragment() {
             if (event.action == MotionEvent.ACTION_UP) {
                 if (::controller.isInitialized) {
                     controller.tapToFocus(event.x, event.y)
+                    
+                    setupExposureSlider()
+                    binding.sliderExposure.visibility = View.VISIBLE
+                    handler.removeCallbacks(exposureFadeRunnable)
+                    handler.postDelayed(exposureFadeRunnable, 3000L)
+                    
                     Toast.makeText(requireContext(), "초점과 노출을 재정렬합니다", Toast.LENGTH_SHORT).show()
                 }
             }
@@ -290,15 +365,19 @@ class CameraFragment : Fragment() {
         }
     }
 
+
     private fun setupRatioControls() {
         binding.btnRatio34.setOnClickListener {
             updateRatioSelection(CameraController.RATIO_3_4)
+            saveCameraSettings()
         }
         binding.btnRatio169.setOnClickListener {
             updateRatioSelection(CameraController.RATIO_16_9)
+            saveCameraSettings()
         }
         binding.btnRatioFull.setOnClickListener {
             updateRatioSelection(CameraController.RATIO_FULL)
+            saveCameraSettings()
         }
         // 초기 비율 버튼 색상 셋업
         updateRatioSelection(controller.currentRatioMode)
@@ -346,6 +425,7 @@ class CameraFragment : Fragment() {
             val muted = controller.isAudioMuted
             binding.btnMuteAudio.text = if (muted) "🔇 소리 끔" else "🎤 소리 켬"
             binding.btnMuteAudio.setTextColor(if (muted) Color.parseColor("#FF5252") else Color.WHITE)
+            saveCameraSettings()
         }
 
         // 3. 무음 토글
@@ -354,8 +434,10 @@ class CameraFragment : Fragment() {
             val mute = controller.isMuteSound
             binding.btnMuteSound.text = if (mute) "🔇 무음 ON" else "🔊 무음 OFF"
             binding.btnMuteSound.setTextColor(if (mute) Color.parseColor("#FFC107") else Color.WHITE)
+            saveCameraSettings()
         }
     }
+
 
     private fun updateThumbnail() {
         val ctx = context ?: return
@@ -513,7 +595,47 @@ class CameraFragment : Fragment() {
             .commit()
     }
 
+    private fun saveCameraSettings() {
+        if (!::controller.isInitialized) return
+        val sp = requireContext().getSharedPreferences("camera_pref", Context.MODE_PRIVATE)
+        sp.edit().apply {
+            putString("last_camera_id", controller.activeCameraId())
+            putFloat("last_zoom_ratio", controller.zoomRatio)
+            putBoolean("last_audio_muted", controller.isAudioMuted)
+            putBoolean("last_mute_sound", controller.isMuteSound)
+            putInt("last_ratio_mode", controller.currentRatioMode)
+            apply()
+        }
+    }
+
+    private fun restoreCameraSettings() {
+        if (!::controller.isInitialized) return
+        val sp = requireContext().getSharedPreferences("camera_pref", Context.MODE_PRIVATE)
+        val lastCameraId = sp.getString("last_camera_id", null)
+        val lastZoom = sp.getFloat("last_zoom_ratio", 1.0f)
+        val lastAudioMuted = sp.getBoolean("last_audio_muted", false)
+        val lastMuteSound = sp.getBoolean("last_mute_sound", false)
+        val lastRatioMode = sp.getInt("last_ratio_mode", CameraController.RATIO_3_4)
+
+        lastCameraId?.let { id ->
+            if (controller.isFacingBack()) {
+                controller.selectBackLens(id)
+            }
+        }
+        controller.setZoomRatio(lastZoom)
+        controller.isAudioMuted = lastAudioMuted
+        controller.isMuteSound = lastMuteSound
+        
+        binding.btnMuteAudio.text = if (lastAudioMuted) "🔇 소리 끔" else "🎤 소리 켬"
+        binding.btnMuteAudio.setTextColor(if (lastAudioMuted) Color.parseColor("#FF5252") else Color.WHITE)
+        binding.btnMuteSound.text = if (lastMuteSound) "🔇 무음 ON" else "🔊 무음 OFF"
+        binding.btnMuteSound.setTextColor(if (lastMuteSound) Color.parseColor("#FFC107") else Color.WHITE)
+        
+        updateRatioSelection(lastRatioMode)
+    }
+
     override fun onDestroyView() {
+        handler.removeCallbacks(exposureFadeRunnable)
         binding.txtTimer.removeCallbacks(timerRunnable)
         
         if (::controller.isInitialized) {
@@ -528,3 +650,4 @@ class CameraFragment : Fragment() {
         super.onDestroyView()
     }
 }
+

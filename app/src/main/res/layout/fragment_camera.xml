@@ -27,6 +27,24 @@
         app:layout_constraintStart_toStartOf="@id/previewView"
         app:layout_constraintEnd_toEndOf="@id/previewView" />
 
+    <!-- 수직 AE 노출 보정 밝기 슬라이더 (평소에는 gone) -->
+    <SeekBar
+        android:id="@+id/sliderExposure"
+        android:layout_width="180dp"
+        android:layout_height="32dp"
+        android:rotation="270"
+        android:visibility="gone"
+        android:max="20"
+        android:progress="10"
+        android:thumbTint="#FFC107"
+        android:progressTint="#FFC107"
+        android:progressBackgroundTint="#FFFFFF"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintTop_toTopOf="parent"
+        android:layout_marginEnd="-60dp" />
+
+
     <!-- 3. 상단 퀵 메뉴바 (글래스모피즘 반투명 바) -->
     <LinearLayout
         android:id="@+id/topQuickBar"
@@ -182,11 +200,11 @@
             android:layout_marginBottom="4dp">
 
             <com.google.android.material.button.MaterialButton
-                android:id="@+id/btnZoom05"
+                android:id="@+id/btnZoom06"
                 style="@style/Widget.Material3.Button.TextButton"
                 android:layout_width="48dp"
                 android:layout_height="36dp"
-                android:text="0.5x"
+                android:text="0.6x"
                 android:textColor="@android:color/white"
                 android:textSize="11sp"
                 android:insetTop="0dp"

@@ -176,6 +176,53 @@
         </RelativeLayout>
     </com.google.android.material.card.MaterialCardView>
 
+    <!-- 빠른 녹화 카드 -->
+    <com.google.android.material.card.MaterialCardView
+        android:id="@+id/cardFastRecord"
+        style="@style/Widget.Material3.CardView.Filled"
+        android:layout_width="match_parent"
+        android:layout_height="80dp"
+        android:layout_marginTop="16dp"
+        app:cardBackgroundColor="#33FFC107"
+        app:cardCornerRadius="20dp"
+        app:strokeColor="#FFC107"
+        app:strokeWidth="1dp"
+        app:layout_constraintTop_toBottomOf="@id/cardStartCamera">
+
+        <RelativeLayout
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:paddingHorizontal="20dp"
+            android:paddingVertical="12dp">
+
+            <TextView
+                android:id="@+id/lblFastRecord"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="⚡ 빠른 녹화 (Fast Record)"
+                android:textColor="#FFC107"
+                android:textSize="16sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_below="@id/lblFastRecord"
+                android:layout_marginTop="4dp"
+                android:text="마지막으로 선택한 세팅으로 즉시 백그라운드 녹화를 시작합니다."
+                android:textColor="#E6FFFFFF"
+                android:textSize="11sp" />
+
+            <ImageView
+                android:layout_width="24dp"
+                android:layout_height="24dp"
+                android:layout_alignParentEnd="true"
+                android:layout_centerVertical="true"
+                android:src="@android:drawable/ic_media_play"
+                app:tint="#FFC107" />
+        </RelativeLayout>
+    </com.google.android.material.card.MaterialCardView>
+
     <!-- 비공개 보관함 카드 -->
     <com.google.android.material.card.MaterialCardView
         android:id="@+id/cardPrivateVault"
@@ -187,7 +234,7 @@
         app:cardCornerRadius="20dp"
         app:strokeColor="#33FFFFFF"
         app:strokeWidth="1dp"
-        app:layout_constraintTop_toBottomOf="@id/cardStartCamera">
+        app:layout_constraintTop_toBottomOf="@id/cardFastRecord">
 
         <RelativeLayout
             android:layout_width="match_parent"
