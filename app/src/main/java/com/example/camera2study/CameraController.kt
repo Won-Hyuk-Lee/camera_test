@@ -208,8 +208,14 @@ class CameraController(private val context: Context) {
             else -> AspectRatio.RATIO_16_9
         }
 
+        // 현재 디스플레이 회전 정보. 액티비티가 portrait 고정이지만 명시적으로 use case에 주입한다.
+        val displayRotation = previewView?.display?.rotation
+            ?: android.view.Surface.ROTATION_0
+
         // Preview 빌더 — 가능하면 FPS 힌트를 capture request에 주입한다.
-        val previewBuilder = Preview.Builder().setTargetAspectRatio(targetRatio)
+        val previewBuilder = Preview.Builder()
+            .setTargetAspectRatio(targetRatio)
+            .setTargetRotation(displayRotation)
         try {
             androidx.camera.camera2.interop.Camera2Interop.Extender(previewBuilder)
                 .setCaptureRequestOption(
@@ -229,6 +235,7 @@ class CameraController(private val context: Context) {
         // 2. ImageCapture (사진 촬영)
         val imageCaptureBuilder = ImageCapture.Builder()
             .setTargetAspectRatio(targetRatio)
+            .setTargetRotation(displayRotation)
             .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
         imageCapture = imageCaptureBuilder.build()
 
@@ -237,6 +244,7 @@ class CameraController(private val context: Context) {
             .setQualitySelector(QualitySelector.from(videoQuality))
             .build()
         val videoUseCaseBuilder = VideoCapture.Builder(recorder)
+            .setTargetRotation(displayRotation)
         if (isHdrEnabled) {
             // HDR 10-bit 지원 단말에서만 적용된다. 미지원이면 CameraX가 fallback 처리한다.
             try {
