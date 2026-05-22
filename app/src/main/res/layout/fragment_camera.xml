@@ -177,7 +177,7 @@
             android:padding="0dp" />
     </LinearLayout>
 
-    <!-- 5. 줌 조절 레이아웃 (갤럭시 스타일 둥근 캡슐 퀵버튼 위주) -->
+    <!-- 5. 줌 다이얼 (S25 Ultra 기준 프리셋 0.6x/1x/2x/3x/5x/10x + 슬라이더) -->
     <LinearLayout
         android:id="@+id/zoomControlLayout"
         android:layout_width="0dp"
@@ -187,11 +187,12 @@
         android:background="#99000000"
         android:gravity="center"
         android:layout_marginBottom="12dp"
-        app:layout_constraintBottom_toTopOf="@id/lensChipGroup"
+        app:layout_constraintBottom_toTopOf="@id/modeLayout"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent">
 
         <LinearLayout
+            android:id="@+id/zoomPresetRow"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:orientation="horizontal"
@@ -203,11 +204,11 @@
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btnZoom06"
                 style="@style/Widget.Material3.Button.TextButton"
-                android:layout_width="48dp"
+                android:layout_width="44dp"
                 android:layout_height="36dp"
                 android:text="0.6x"
                 android:textColor="@android:color/white"
-                android:textSize="11sp"
+                android:textSize="10sp"
                 android:insetTop="0dp"
                 android:insetBottom="0dp"
                 android:padding="0dp" />
@@ -215,11 +216,11 @@
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btnZoom10"
                 style="@style/Widget.Material3.Button.TextButton"
-                android:layout_width="48dp"
+                android:layout_width="44dp"
                 android:layout_height="36dp"
-                android:text="1.0x"
+                android:text="1x"
                 android:textColor="#FFC107"
-                android:textSize="11sp"
+                android:textSize="10sp"
                 android:insetTop="0dp"
                 android:insetBottom="0dp"
                 android:padding="0dp" />
@@ -227,11 +228,47 @@
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btnZoom20"
                 style="@style/Widget.Material3.Button.TextButton"
-                android:layout_width="48dp"
+                android:layout_width="44dp"
                 android:layout_height="36dp"
-                android:text="2.0x"
+                android:text="2x"
                 android:textColor="@android:color/white"
-                android:textSize="11sp"
+                android:textSize="10sp"
+                android:insetTop="0dp"
+                android:insetBottom="0dp"
+                android:padding="0dp" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnZoom30"
+                style="@style/Widget.Material3.Button.TextButton"
+                android:layout_width="44dp"
+                android:layout_height="36dp"
+                android:text="3x"
+                android:textColor="@android:color/white"
+                android:textSize="10sp"
+                android:insetTop="0dp"
+                android:insetBottom="0dp"
+                android:padding="0dp" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnZoom50"
+                style="@style/Widget.Material3.Button.TextButton"
+                android:layout_width="44dp"
+                android:layout_height="36dp"
+                android:text="5x"
+                android:textColor="@android:color/white"
+                android:textSize="10sp"
+                android:insetTop="0dp"
+                android:insetBottom="0dp"
+                android:padding="0dp" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnZoom100"
+                style="@style/Widget.Material3.Button.TextButton"
+                android:layout_width="44dp"
+                android:layout_height="36dp"
+                android:text="10x"
+                android:textColor="@android:color/white"
+                android:textSize="10sp"
                 android:insetTop="0dp"
                 android:insetBottom="0dp"
                 android:padding="0dp" />
@@ -241,25 +278,12 @@
             android:id="@+id/sliderZoom"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:valueFrom="1.0"
-            android:valueTo="8.0"
+            android:valueFrom="0.6"
+            android:valueTo="10.0"
             android:value="1.0"
             app:thumbColor="#FFC107"
             app:trackColorActive="#FFC107" />
     </LinearLayout>
-
-    <!-- 물리적 다중 렌즈 리스트 -->
-    <com.google.android.material.chip.ChipGroup
-        android:id="@+id/lensChipGroup"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_marginBottom="12dp"
-        android:background="#80000000"
-        android:padding="4dp"
-        app:singleSelection="true"
-        app:layout_constraintBottom_toTopOf="@id/modeLayout"
-        app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintStart_toStartOf="parent" />
 
     <!-- 6. 촬영 / 동영상 모드 선택 레이아웃 -->
     <LinearLayout

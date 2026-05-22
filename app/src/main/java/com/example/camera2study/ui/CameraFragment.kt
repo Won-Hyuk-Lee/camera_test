@@ -28,7 +28,7 @@ import com.example.camera2study.CameraForegroundService
 import com.example.camera2study.R
 import com.example.camera2study.databinding.FragmentCameraBinding
 import com.example.camera2study.util.CameraUtils
-import com.google.android.material.chip.Chip
+import com.google.android.material.button.MaterialButton
 import java.io.File
 
 class CameraFragment : Fragment() {
@@ -71,7 +71,6 @@ class CameraFragment : Fragment() {
             controller.attachPreview(binding.previewView)
 
             // UI 및 리스너 설정
-            populateLensChips()
             setupZoomListeners()
             setupTouchToFocus()
             setupRatioControls()
@@ -232,54 +231,45 @@ class CameraFragment : Fragment() {
         binding.txtTimer.visibility = View.VISIBLE
     }
 
-    private fun populateLensChips() {
-        if (!::controller.isInitialized) return
-        binding.lensChipGroup.removeAllViews()
-        val lenses = controller.backLenses
-        if (lenses.size <= 1) {
-            binding.lensChipGroup.visibility = View.GONE
-            return
-        }
-        binding.lensChipGroup.visibility = View.VISIBLE
-        lenses.forEach { lens ->
-            val chip = Chip(requireContext()).apply {
-                text = if (lens.isWide) "광각 ${"%.1f".format(lens.focalLength)}mm"
-                else "${"%.1f".format(lens.focalLength)}mm"
-                isCheckable = true
-                isChecked = lens.cameraId == controller.activeCameraId()
-                setOnClickListener {
-                    controller.selectBackLens(lens.cameraId)
-                    saveCameraSettings()
-                }
-            }
-            binding.lensChipGroup.addView(chip)
-        }
-
-    }
-
     private fun updateLensIndicator(cameraId: String?) {
         if (cameraId == null || !::controller.isInitialized) {
             binding.txtLensInfo.text = ""
             return
         }
-        val focal = controller.backLenses.firstOrNull { it.cameraId == cameraId }?.focalLength
-        val focalText = focal?.let { "%.1fmm".format(it) } ?: "-"
         val facing = if (controller.isFacingBack()) "후면" else "전면"
-        binding.txtLensInfo.text = "$facing $focalText"
-
-        for (i in 0 until binding.lensChipGroup.childCount) {
-            val chip = binding.lensChipGroup.getChildAt(i) as? Chip ?: continue
-            val lens = controller.backLenses.getOrNull(i) ?: continue
-            chip.isChecked = lens.cameraId == cameraId
-        }
+        binding.txtLensInfo.text = "$facing ${"%.1fx".format(controller.zoomRatio)}"
     }
+
+    private data class ZoomPreset(val button: MaterialButton, val ratio: Float)
+
+    private val zoomPresets: List<ZoomPreset>
+        get() = listOf(
+            ZoomPreset(binding.btnZoom06, 0.6f),
+            ZoomPreset(binding.btnZoom10, 1.0f),
+            ZoomPreset(binding.btnZoom20, 2.0f),
+            ZoomPreset(binding.btnZoom30, 3.0f),
+            ZoomPreset(binding.btnZoom50, 5.0f),
+            ZoomPreset(binding.btnZoom100, 10.0f)
+        )
 
     private fun setupZoomListeners() {
         if (!::controller.isInitialized) return
-        
-        binding.sliderZoom.valueFrom = controller.getMinZoomRatio()
-        binding.sliderZoom.valueTo = controller.getMaxZoomRatio()
-        binding.sliderZoom.value = controller.zoomRatio.coerceIn(controller.getMinZoomRatio(), controller.getMaxZoomRatio())
+
+        val min = controller.getMinZoomRatio()
+        val max = controller.getMaxZoomRatio()
+
+        // 단말이 지원하지 않는 프리셋은 숨긴다.
+        zoomPresets.forEach { preset ->
+            preset.button.visibility = if (preset.ratio in min..max) View.VISIBLE else View.GONE
+            preset.button.setOnClickListener {
+                controller.setZoomRatio(preset.ratio)
+                saveCameraSettings()
+            }
+        }
+
+        binding.sliderZoom.valueFrom = min
+        binding.sliderZoom.valueTo = max
+        binding.sliderZoom.value = controller.zoomRatio.coerceIn(min, max)
 
         binding.sliderZoom.addOnChangeListener { _, value, fromUser ->
             if (fromUser) {
@@ -287,29 +277,20 @@ class CameraFragment : Fragment() {
                 saveCameraSettings()
             }
         }
-
-        binding.btnZoom06.setOnClickListener {
-            controller.setZoomRatio(0.6f)
-            saveCameraSettings()
-        }
-        binding.btnZoom10.setOnClickListener {
-            controller.setZoomRatio(1.0f)
-            saveCameraSettings()
-        }
-        binding.btnZoom20.setOnClickListener {
-            controller.setZoomRatio(2.0f)
-            saveCameraSettings()
-        }
     }
 
     private fun updateZoomUi(current: Float, max: Float) {
         if (!isAdded) return
         binding.sliderZoom.valueTo = max
         binding.sliderZoom.value = current.coerceIn(binding.sliderZoom.valueFrom, max)
-        
-        binding.btnZoom06.setTextColor(if (current <= 0.7f) Color.parseColor("#FFC107") else Color.WHITE)
-        binding.btnZoom10.setTextColor(if (current > 0.9f && current < 1.2f) Color.parseColor("#FFC107") else Color.WHITE)
-        binding.btnZoom20.setTextColor(if (current >= 1.9f && current < 2.2f) Color.parseColor("#FFC107") else Color.WHITE)
+
+        // 현재 배율과 가장 가까운 프리셋만 활성 색상.
+        val nearest = zoomPresets.filter { it.button.visibility == View.VISIBLE }
+            .minByOrNull { kotlin.math.abs(it.ratio - current) }
+        zoomPresets.forEach { preset ->
+            val active = preset === nearest && kotlin.math.abs(preset.ratio - current) < 0.25f
+            preset.button.setTextColor(if (active) Color.parseColor("#FFC107") else Color.WHITE)
+        }
     }
 
 
