@@ -114,6 +114,16 @@ class CameraController(private val context: Context) {
     var onRecordingEvent: ((VideoRecordEvent) -> Unit)? = null
     var onCameraChanged: ((String?) -> Unit)? = null
     var onZoomChanged: ((Float, Float) -> Unit)? = null // current, max
+    var onFinalizeEnded: (() -> Unit)? = null
+
+    // 사진/영상 모드 분리. 자동 모드의 AF mode 결정에 사용한다.
+    var isVideoMode: Boolean = false
+        set(value) {
+            if (field != value) {
+                field = value
+                applyOptionsLive()
+            }
+        }
 
     val backLenses: List<LensInfo> by lazy { CameraUtils.listBackLenses(context) }
 
@@ -141,7 +151,12 @@ class CameraController(private val context: Context) {
     }
 
     fun detachPreview() {
-        previewUseCase?.setSurfaceProvider(null)
+        // 녹화 중에는 surface provider를 null로 만들지 않는다.
+        // null로 만들면 백그라운드/화면 꺼짐 상태에서 CameraX 세션이 흔들려
+        // 정지 프레임 파일이 저장되는 freeze 문제가 발생한다.
+        if (!isRecording()) {
+            previewUseCase?.setSurfaceProvider(null)
+        }
         previewView = null
     }
 
@@ -251,11 +266,21 @@ class CameraController(private val context: Context) {
             builder.setCaptureRequestOption(CaptureRequest.LENS_APERTURE, it)
         }
 
-        // 자동 초점 모드 강제 주입 (상시 연속 자동초점 보장)
-        builder.setCaptureRequestOption(
-            CaptureRequest.CONTROL_AF_MODE,
+        // 사진 모드는 CONTINUOUS_PICTURE, 영상 모드는 CONTINUOUS_VIDEO로 분기한다.
+        val afMode = if (isVideoMode) {
             CameraMetadata.CONTROL_AF_MODE_CONTINUOUS_VIDEO
-        )
+        } else {
+            CameraMetadata.CONTROL_AF_MODE_CONTINUOUS_PICTURE
+        }
+        builder.setCaptureRequestOption(CaptureRequest.CONTROL_AF_MODE, afMode)
+
+        // 노출 자동 보정 및 안티밴딩
+        if (expNs == null) {
+            builder.setCaptureRequestOption(
+                CaptureRequest.CONTROL_AE_ANTIBANDING_MODE,
+                CameraMetadata.CONTROL_AE_ANTIBANDING_MODE_AUTO
+            )
+        }
 
         control.setCaptureRequestOptions(builder.build())
     }
@@ -490,7 +515,10 @@ class CameraController(private val context: Context) {
                 // 연쇄 반복 녹화가 끝났을 때만 WakeLock을 완전 해제
                 val wasAutoStop = isAutoStopping
                 isAutoStopping = false
-                
+
+                val willRepeat = wasAutoStop && !event.hasError() &&
+                    (currentRepeatCount + 1) < maxRepeatCount
+
                 if (wasAutoStop && !event.hasError()) {
                     currentRepeatCount++
                     if (currentRepeatCount < maxRepeatCount) {
@@ -504,6 +532,11 @@ class CameraController(private val context: Context) {
                 } else {
                     currentRepeatCount = 0
                     releaseWakeLock()
+                }
+
+                // 반복 녹화로 이어지지 않는 진짜 종료 시점에만 service 정리 신호를 보낸다.
+                if (!willRepeat) {
+                    onFinalizeEnded?.invoke()
                 }
             }
         }
@@ -520,11 +553,10 @@ class CameraController(private val context: Context) {
     }
 
     fun stopRecording() {
-        muteSystemSound()
+        // recording = null과 wake lock 해제는 Recording.Finalize callback에서 처리한다.
+        // 여기서 즉시 정리하면 finalize 콜백과 race가 발생해 파일이 손상될 수 있다.
         recording?.stop()
-        recording = null
         mainHandler.removeCallbacks(autoStopRunnable)
-        releaseWakeLock()
     }
 
     fun isRecording(): Boolean = recording != null
