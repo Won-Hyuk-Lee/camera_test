@@ -38,7 +38,7 @@ import com.example.camera2study.util.LensInfo
 import java.io.File
 import java.util.concurrent.TimeUnit
 
-@OptIn(ExperimentalCamera2Interop::class)
+@androidx.annotation.OptIn(ExperimentalCamera2Interop::class)
 class CameraController(private val context: Context) {
 
     companion object {
