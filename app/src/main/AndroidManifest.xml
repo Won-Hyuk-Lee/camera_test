@@ -5,9 +5,11 @@
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CAMERA" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.VIBRATE" />
 
 
     <uses-feature
@@ -40,7 +42,7 @@
         <service
             android:name=".CameraForegroundService"
             android:exported="false"
-            android:foregroundServiceType="camera" />
+            android:foregroundServiceType="camera|microphone" />
 
     </application>
 </manifest>
