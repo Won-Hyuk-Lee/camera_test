@@ -19,9 +19,14 @@ import android.widget.MediaController
 import android.widget.TextView
 import android.widget.Toast
 import android.widget.VideoView
+import androidx.collection.LruCache
 import androidx.fragment.app.Fragment
+import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.GridLayoutManager
 import androidx.recyclerview.widget.RecyclerView
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import com.example.camera2study.R
 import com.example.camera2study.databinding.FragmentPrivateVaultBinding
 import com.example.camera2study.databinding.ItemVaultMediaBinding
@@ -68,24 +73,29 @@ class PrivateVaultFragment : Fragment() {
     }
 
     private fun loadMediaFiles() {
-        val privateDir = File(requireContext().getExternalFilesDir(null), "private_vault")
-        if (!privateDir.exists()) privateDir.mkdirs()
+        val ctx = context ?: return
+        val privateDir = File(ctx.getExternalFilesDir(null), "private_vault")
 
-        val files = privateDir.listFiles()?.filter {
-            it.isFile && (it.name.endsWith(".jpg") || it.name.endsWith(".mp4"))
+        viewLifecycleOwner.lifecycleScope.launch {
+            val sorted = withContext(Dispatchers.IO) {
+                if (!privateDir.exists()) privateDir.mkdirs()
+                privateDir.listFiles()
+                    ?.filter { it.isFile && (it.name.endsWith(".jpg") || it.name.endsWith(".mp4")) }
+                    ?.sortedByDescending { it.lastModified() }
+                    .orEmpty()
+            }
+            if (_binding == null) return@launch
+            mediaFiles.clear()
+            mediaFiles.addAll(sorted)
+            if (mediaFiles.isEmpty()) {
+                binding.emptyView.visibility = View.VISIBLE
+                binding.rvVaultMedia.visibility = View.GONE
+            } else {
+                binding.emptyView.visibility = View.GONE
+                binding.rvVaultMedia.visibility = View.VISIBLE
+            }
+            adapter.notifyDataSetChanged()
         }
-
-        mediaFiles.clear()
-        if (!files.isNullOrEmpty()) {
-            // 최신 파일 순 정렬
-            mediaFiles.addAll(files.sortedByDescending { it.lastModified() })
-            binding.emptyView.visibility = View.GONE
-            binding.rvVaultMedia.visibility = View.VISIBLE
-        } else {
-            binding.emptyView.visibility = View.VISIBLE
-            binding.rvVaultMedia.visibility = View.GONE
-        }
-        adapter.notifyDataSetChanged()
     }
 
     // --- 인앱 뷰어 / 비디오 안전 플레이어 다이얼로그 ---
@@ -128,6 +138,15 @@ class PrivateVaultFragment : Fragment() {
             videoView.setOnPreparedListener { mp ->
                 mp.isLooping = false
                 videoView.start()
+            }
+
+            // 다이얼로그가 닫힐 때 MediaPlayer/audio focus 누수를 방지한다.
+            dialog.setOnDismissListener {
+                try {
+                    videoView.stopPlayback()
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
             }
         }
 
@@ -228,7 +247,17 @@ class PrivateVaultFragment : Fragment() {
         private val onItemLongClick: (File) -> Unit
     ) : RecyclerView.Adapter<VaultAdapter.MediaViewHolder>() {
 
-        class MediaViewHolder(val binding: ItemVaultMediaBinding) : RecyclerView.ViewHolder(binding.root)
+        // 8MB 캐시. 같은 폴더에서 스크롤할 때 매번 디코드하지 않게 한다.
+        private val thumbCache = object : LruCache<String, android.graphics.Bitmap>(8 * 1024 * 1024) {
+            override fun sizeOf(key: String, value: android.graphics.Bitmap): Int = value.byteCount
+        }
+
+        private val ioExecutor = java.util.concurrent.Executors.newFixedThreadPool(2)
+        private val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
+
+        class MediaViewHolder(val binding: ItemVaultMediaBinding) : RecyclerView.ViewHolder(binding.root) {
+            var boundPath: String? = null
+        }
 
         override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): MediaViewHolder {
             val binding = ItemVaultMediaBinding.inflate(LayoutInflater.from(parent.context), parent, false)
@@ -237,28 +266,27 @@ class PrivateVaultFragment : Fragment() {
 
         override fun onBindViewHolder(holder: MediaViewHolder, position: Int) {
             val file = list[position]
+            val path = file.absolutePath
+            holder.boundPath = path
             holder.binding.txtMediaName.text = file.name
+            holder.binding.imgPlayMark.visibility =
+                if (file.name.endsWith(".mp4")) View.VISIBLE else View.GONE
 
-            // 썸네일 디코딩 및 생성
-            try {
-                if (file.name.endsWith(".jpg")) {
-                    holder.binding.imgPlayMark.visibility = View.GONE
-                    val bitmap = BitmapFactory.decodeFile(file.absolutePath)
-                    holder.binding.imgThumbnail.setImageBitmap(bitmap)
-                } else if (file.name.endsWith(".mp4")) {
-                    holder.binding.imgPlayMark.visibility = View.VISIBLE
-                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
-                        val bitmap = ThumbnailUtils.createVideoThumbnail(file, Size(128, 128), CancellationSignal())
-                        holder.binding.imgThumbnail.setImageBitmap(bitmap)
-                    } else {
-                        @Suppress("DEPRECATION")
-                        val bitmap = ThumbnailUtils.createVideoThumbnail(file.absolutePath, MediaStore.Images.Thumbnails.MINI_KIND)
-                        holder.binding.imgThumbnail.setImageBitmap(bitmap)
+            val cached = thumbCache.get(path)
+            if (cached != null) {
+                holder.binding.imgThumbnail.setImageBitmap(cached)
+            } else {
+                holder.binding.imgThumbnail.setImageResource(android.R.drawable.ic_menu_gallery)
+                ioExecutor.execute {
+                    val bitmap = decodeThumbnail(file)
+                    if (bitmap != null) thumbCache.put(path, bitmap)
+                    mainHandler.post {
+                        // 스크롤로 인해 holder가 다른 항목에 재바인딩된 경우 결과를 버린다.
+                        if (holder.boundPath == path && bitmap != null) {
+                            holder.binding.imgThumbnail.setImageBitmap(bitmap)
+                        }
                     }
                 }
-            } catch (e: Exception) {
-                e.printStackTrace()
-                holder.binding.imgThumbnail.setImageResource(android.R.drawable.ic_menu_gallery)
             }
 
             holder.binding.mediaCard.setOnClickListener { onItemClick(file) }
@@ -266,6 +294,23 @@ class PrivateVaultFragment : Fragment() {
                 onItemLongClick(file)
                 true
             }
+        }
+
+        private fun decodeThumbnail(file: File): android.graphics.Bitmap? = try {
+            if (file.name.endsWith(".jpg")) {
+                val opts = BitmapFactory.Options().apply { inSampleSize = 4 }
+                BitmapFactory.decodeFile(file.absolutePath, opts)
+            } else if (file.name.endsWith(".mp4")) {
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+                    ThumbnailUtils.createVideoThumbnail(file, Size(128, 128), CancellationSignal())
+                } else {
+                    @Suppress("DEPRECATION")
+                    ThumbnailUtils.createVideoThumbnail(file.absolutePath, MediaStore.Images.Thumbnails.MINI_KIND)
+                }
+            } else null
+        } catch (e: Exception) {
+            e.printStackTrace()
+            null
         }
 
         override fun getItemCount(): Int = list.size
