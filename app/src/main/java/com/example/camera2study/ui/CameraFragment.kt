@@ -89,6 +89,7 @@ class CameraFragment : Fragment() {
                 Handler(Looper.getMainLooper()).postDelayed({
                     if (::controller.isInitialized && !controller.isRecording()) {
                         controller.resetRepeatCount()
+                        CameraForegroundService.requestStartRecording(requireContext())
                         controller.startRecording()
                     }
                 }, 500L)
@@ -122,9 +123,10 @@ class CameraFragment : Fragment() {
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
 
-        // 백그라운드 서비스 바인딩
+        // 비녹화 상태에서는 service를 명시적으로 시작하지 않는다.
+        // bindService(BIND_AUTO_CREATE)로 service를 만들기만 하고, foreground 격상은 녹화 시작 시점에 한다.
+        // 이렇게 하면 카메라 화면을 닫을 때 (unbind) service가 자동으로 정리된다.
         val ctx = requireContext()
-        CameraForegroundService.start(ctx)
         val intent = android.content.Intent(ctx, CameraForegroundService::class.java)
         ctx.bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE)
 
@@ -165,14 +167,11 @@ class CameraFragment : Fragment() {
     private fun handleShutterClick() {
         if (!::controller.isInitialized) return
         if (isPhotoMode) {
-            // 1. 사진 촬영
+            // 1. 사진 촬영 — 성공 알림 Toast는 띄우지 않는다. 썸네일 갱신으로 피드백 대체.
             animateShutterClick()
             controller.takePicture(
-                onSuccess = { file ->
-                    activity?.runOnUiThread {
-                        Toast.makeText(requireContext(), "사진 촬영 완료 및 비공개 저장", Toast.LENGTH_SHORT).show()
-                        updateThumbnail()
-                    }
+                onSuccess = {
+                    activity?.runOnUiThread { updateThumbnail() }
                 },
                 onError = { e ->
                     activity?.runOnUiThread {
@@ -186,6 +185,8 @@ class CameraFragment : Fragment() {
                 controller.stopRecording()
             } else {
                 controller.resetRepeatCount()
+                // 녹화 시작 시점에만 foreground service를 격상시킨다. 비녹화 시 service가 남지 않게 한다.
+                CameraForegroundService.requestStartRecording(requireContext())
                 controller.startRecording()
             }
         }
@@ -206,22 +207,25 @@ class CameraFragment : Fragment() {
 
     private fun setPhotoModeUi() {
         isPhotoMode = true
+        if (::controller.isInitialized) controller.isVideoMode = false
         binding.txtModePhoto.setTextColor(Color.parseColor("#FFC107"))
         binding.txtModeVideo.setTextColor(Color.parseColor("#8AFFFFFF"))
-        
+
         binding.shutterCenter.setBackgroundResource(R.drawable.shutter_center_photo)
-        binding.btnMuteAudio.alpha = 0.3f
-        binding.btnMuteAudio.isEnabled = false
+        // 사진 모드에서는 마이크 버튼을 완전히 숨긴다.
+        binding.btnMuteAudio.visibility = View.GONE
 
         binding.txtTimer.visibility = View.INVISIBLE
     }
 
     private fun setVideoModeUi() {
         isPhotoMode = false
+        if (::controller.isInitialized) controller.isVideoMode = true
         binding.txtModePhoto.setTextColor(Color.parseColor("#8AFFFFFF"))
         binding.txtModeVideo.setTextColor(Color.parseColor("#FFC107"))
-        
+
         binding.shutterCenter.setBackgroundResource(R.drawable.shutter_center_video)
+        binding.btnMuteAudio.visibility = View.VISIBLE
         binding.btnMuteAudio.alpha = 1.0f
         binding.btnMuteAudio.isEnabled = true
 
@@ -358,7 +362,6 @@ class CameraFragment : Fragment() {
                     handler.removeCallbacks(exposureFadeRunnable)
                     handler.postDelayed(exposureFadeRunnable, 3000L)
                     
-                    Toast.makeText(requireContext(), "초점과 노출을 재정렬합니다", Toast.LENGTH_SHORT).show()
                 }
             }
             true
@@ -562,17 +565,12 @@ class CameraFragment : Fragment() {
                     recordStartMs = SystemClock.elapsedRealtime()
                 }
 
+                // 완료 Toast는 띄우지 않는다. 오류 발생 시에만 사용자에게 노출한다.
                 if (event.hasError()) {
                     Toast.makeText(
                         requireContext(),
-                        "녹화 완료 (오류: ${event.error})",
+                        "녹화 오류: ${event.error}",
                         Toast.LENGTH_LONG
-                    ).show()
-                } else {
-                    Toast.makeText(
-                        requireContext(),
-                        "비공개 보관함에 비디오가 저장되었습니다.",
-                        Toast.LENGTH_SHORT
                     ).show()
                 }
                 updateThumbnail()
@@ -637,15 +635,24 @@ class CameraFragment : Fragment() {
     override fun onDestroyView() {
         handler.removeCallbacks(exposureFadeRunnable)
         binding.txtTimer.removeCallbacks(timerRunnable)
-        
+
+        val ctx = context
+        val notRecording = !::controller.isInitialized || !controller.isRecording()
+
         if (::controller.isInitialized) {
             controller.detachPreview()
         }
-        
+
         if (isBound) {
             requireContext().unbindService(serviceConnection)
             isBound = false
         }
+
+        // 녹화 중이 아니면 foreground service가 절대 남지 않게 명시적으로 종료한다.
+        if (notRecording && ctx != null) {
+            CameraForegroundService.stop(ctx)
+        }
+
         _binding = null
         super.onDestroyView()
     }
