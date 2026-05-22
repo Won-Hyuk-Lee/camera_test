@@ -168,10 +168,11 @@ class CameraController(private val context: Context) {
 
         provider.unbindAll()
 
-        // 1. 화면 비율 결정
+        // 1. 화면 비율 결정 — 3:4는 4:3 sensor, 16:9 / Full은 16:9 sensor 출력으로 통일한다.
+        // Full은 디스플레이 비율로 preview를 채우되 저장 결과는 16:9로 둬 Galaxy 기본 동작과 일치시킨다.
         val targetRatio = when (currentRatioMode) {
-            RATIO_16_9 -> AspectRatio.RATIO_16_9
-            else -> AspectRatio.RATIO_4_3 // Full 비율도 기본적으로 4:3 비율 결합 후 View에서 크롭
+            RATIO_3_4 -> AspectRatio.RATIO_4_3
+            else -> AspectRatio.RATIO_16_9
         }
 
         // Preview 빌더

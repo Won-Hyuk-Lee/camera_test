@@ -370,21 +370,31 @@ class CameraFragment : Fragment() {
     private fun updateRatioSelection(mode: Int) {
         if (!::controller.isInitialized) return
         controller.currentRatioMode = mode
-        
+
         binding.btnRatio34.setTextColor(if (mode == CameraController.RATIO_3_4) Color.parseColor("#FFC107") else Color.WHITE)
         binding.btnRatio169.setTextColor(if (mode == CameraController.RATIO_16_9) Color.parseColor("#FFC107") else Color.WHITE)
         binding.btnRatioFull.setTextColor(if (mode == CameraController.RATIO_FULL) Color.parseColor("#FFC107") else Color.WHITE)
 
-        // PreviewView 종횡비 시각적 조절
+        // 측정 완료 후 적용해 초기 width 0으로 height가 0이 되는 깨짐을 막는다.
+        binding.previewView.post { applyPreviewAspect(mode) }
+    }
+
+    private fun applyPreviewAspect(mode: Int) {
+        val binding = _binding ?: return
+        val parent = binding.previewView.parent as? View ?: return
+        val parentWidth = parent.width
+        val parentHeight = parent.height
+        if (parentWidth == 0 || parentHeight == 0) return
+
         val params = binding.previewView.layoutParams as ViewGroup.MarginLayoutParams
         when (mode) {
             CameraController.RATIO_3_4 -> {
                 params.width = ViewGroup.LayoutParams.MATCH_PARENT
-                params.height = (binding.previewView.width * 4) / 3
+                params.height = (parentWidth * 4) / 3
             }
             CameraController.RATIO_16_9 -> {
                 params.width = ViewGroup.LayoutParams.MATCH_PARENT
-                params.height = (binding.previewView.width * 16) / 9
+                params.height = (parentWidth * 16) / 9
             }
             CameraController.RATIO_FULL -> {
                 params.width = ViewGroup.LayoutParams.MATCH_PARENT
