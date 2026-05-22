@@ -103,6 +103,22 @@ class CameraController(private val context: Context) {
 
     var isLocationTagEnabled: Boolean = false
 
+    // 자동 모드(false)가 기본. true로 켜면 수동 셔터/조리개/AWB 설정을 허용한다.
+    var isProMode: Boolean = false
+        set(value) {
+            if (field != value) {
+                field = value
+                if (!value) {
+                    // 자동 모드 복귀 시 수동 파라미터 초기화
+                    exposureTimeNs = null
+                    aperture = null
+                    manualWbGains = null
+                    awbMode = CameraMetadata.CONTROL_AWB_MODE_AUTO
+                }
+                applyOptionsLive()
+            }
+        }
+
     // --- 추가 기능 변수 ---
     var currentRatioMode: Int = RATIO_3_4 // 3:4, 16:9, Full
         set(value) {

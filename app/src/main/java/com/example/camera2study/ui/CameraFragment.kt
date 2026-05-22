@@ -488,6 +488,7 @@ class CameraFragment : Fragment() {
             currentFps = controller.targetFps,
             currentHdr = controller.isHdrEnabled,
             currentLocationTag = controller.isLocationTagEnabled,
+            currentProMode = controller.isProMode,
             callbacks = object : SettingsBottomSheet.Callbacks {
                 override fun onAwbMode(mode: Int) = controller.setAwbMode(mode)
                 override fun onWbGains(gains: FloatArray?) = controller.setManualWbGains(gains)
@@ -518,6 +519,11 @@ class CameraFragment : Fragment() {
 
                 override fun onLocationTag(enabled: Boolean) {
                     controller.isLocationTagEnabled = enabled
+                    saveCameraSettings()
+                }
+
+                override fun onProMode(enabled: Boolean) {
+                    controller.isProMode = enabled
                     saveCameraSettings()
                 }
             }
@@ -611,6 +617,7 @@ class CameraFragment : Fragment() {
             putInt("last_fps", controller.targetFps)
             putBoolean("last_hdr", controller.isHdrEnabled)
             putBoolean("last_location_tag", controller.isLocationTagEnabled)
+            putBoolean("last_pro_mode", controller.isProMode)
             apply()
         }
     }
@@ -627,6 +634,7 @@ class CameraFragment : Fragment() {
         val lastFps = sp.getInt("last_fps", 30)
         val lastHdr = sp.getBoolean("last_hdr", false)
         val lastLocationTag = sp.getBoolean("last_location_tag", false)
+        val lastProMode = sp.getBoolean("last_pro_mode", false)
 
         if (!lastFacingBack && controller.isFacingBack()) {
             controller.switchFacing()
@@ -642,6 +650,7 @@ class CameraFragment : Fragment() {
         controller.targetFps = lastFps
         controller.isHdrEnabled = lastHdr
         controller.isLocationTagEnabled = lastLocationTag
+        controller.isProMode = lastProMode
         
         binding.btnMuteAudio.text = if (lastAudioMuted) "🔇 소리 끔" else "🎤 소리 켬"
         binding.btnMuteAudio.setTextColor(if (lastAudioMuted) Color.parseColor("#FF5252") else Color.WHITE)

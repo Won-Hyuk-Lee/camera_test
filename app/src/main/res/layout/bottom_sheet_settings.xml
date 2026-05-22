@@ -10,6 +10,21 @@
         android:orientation="vertical"
         android:padding="20dp">
 
+        <com.google.android.material.switchmaterial.SwitchMaterial
+            android:id="@+id/switchProMode"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="프로 모드 (수동 컨트롤)"
+            android:textStyle="bold"
+            android:paddingBottom="8dp" />
+
+        <LinearLayout
+            android:id="@+id/proModeContainer"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:visibility="gone">
+
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -108,6 +123,8 @@
             android:id="@+id/sliderAperture"
             android:layout_width="match_parent"
             android:layout_height="wrap_content" />
+
+        </LinearLayout>
 
         <View
             android:layout_width="match_parent"

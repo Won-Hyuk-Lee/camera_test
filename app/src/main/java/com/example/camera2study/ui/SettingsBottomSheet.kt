@@ -24,6 +24,7 @@ class SettingsBottomSheet : BottomSheetDialogFragment() {
         fun onFps(fps: Int)
         fun onHdr(enabled: Boolean)
         fun onLocationTag(enabled: Boolean)
+        fun onProMode(enabled: Boolean)
     }
 
     private var _binding: BottomSheetSettingsBinding? = null
@@ -41,6 +42,7 @@ class SettingsBottomSheet : BottomSheetDialogFragment() {
     private var initialFps: Int = 30
     private var initialHdr: Boolean = false
     private var initialLocationTag: Boolean = false
+    private var initialProMode: Boolean = false
 
     private val awbOptions = listOf(
         "AUTO" to CameraMetadata.CONTROL_AWB_MODE_AUTO,
@@ -89,6 +91,7 @@ class SettingsBottomSheet : BottomSheetDialogFragment() {
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
+        setupProModeSwitch()
         setupAwbSpinner()
         setupColorTempSlider()
         setupExposureSlider()
@@ -96,6 +99,26 @@ class SettingsBottomSheet : BottomSheetDialogFragment() {
 
         // 신규 스피너 및 스위치 설정
         setupVideoSettings()
+    }
+
+    private fun setupProModeSwitch() {
+        binding.switchProMode.isChecked = initialProMode
+        binding.proModeContainer.visibility = if (initialProMode) View.VISIBLE else View.GONE
+        binding.switchProMode.setOnCheckedChangeListener { _, isChecked ->
+            binding.proModeContainer.visibility = if (isChecked) View.VISIBLE else View.GONE
+            callbacks?.onProMode(isChecked)
+            if (!isChecked) {
+                // 자동 모드로 복귀할 때 누적된 수동 파라미터를 초기화한다.
+                callbacks?.onAwbMode(CameraMetadata.CONTROL_AWB_MODE_AUTO)
+                callbacks?.onWbGains(null)
+                callbacks?.onExposureTime(null)
+                callbacks?.onAperture(null)
+                binding.spinnerAwb.setSelection(0)
+                binding.sliderColorTemp.value = 5500f
+                binding.sliderExposure.value = 0f
+                binding.txtExposureValue.text = "AUTO"
+            }
+        }
     }
 
     override fun onStart() {
@@ -314,6 +337,7 @@ class SettingsBottomSheet : BottomSheetDialogFragment() {
             currentFps: Int,
             currentHdr: Boolean,
             currentLocationTag: Boolean,
+            currentProMode: Boolean,
             callbacks: Callbacks
         ): SettingsBottomSheet = SettingsBottomSheet().also {
             it.exposureRangeNs = exposureRangeNs
@@ -325,6 +349,7 @@ class SettingsBottomSheet : BottomSheetDialogFragment() {
             it.initialFps = currentFps
             it.initialHdr = currentHdr
             it.initialLocationTag = currentLocationTag
+            it.initialProMode = currentProMode
             it.callbacks = callbacks
         }
     }
