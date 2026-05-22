@@ -6,6 +6,7 @@
     android:background="@android:color/black"
     android:fitsSystemWindows="true">
 
+    <!-- 1. 카메라 뷰파인더 -->
     <androidx.camera.view.PreviewView
         android:id="@+id/previewView"
         android:layout_width="0dp"
@@ -15,108 +16,206 @@
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent" />
 
+    <!-- 2. 커스텀 3x3 격자 오버레이 뷰 (6단계에서 구현 예정) -->
+    <com.example.camera2study.ui.GridOverlayView
+        android:id="@+id/gridOverlayView"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:visibility="gone"
+        app:layout_constraintTop_toTopOf="@id/previewView"
+        app:layout_constraintBottom_toBottomOf="@id/previewView"
+        app:layout_constraintStart_toStartOf="@id/previewView"
+        app:layout_constraintEnd_toEndOf="@id/previewView" />
+
+    <!-- 3. 상단 퀵 메뉴바 (글래스모피즘 반투명 바) -->
+    <LinearLayout
+        android:id="@+id/topQuickBar"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center"
+        android:padding="8dp"
+        android:background="#66000000"
+        app:layout_constraintTop_toTopOf="parent">
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnSettings"
+            style="@style/Widget.Material3.Button.TextButton"
+            android:layout_width="0dp"
+            android:layout_weight="1"
+            android:layout_height="wrap_content"
+            android:text="⚙ 상세설정"
+            android:textColor="@android:color/white"
+            android:textSize="11sp" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnGridToggle"
+            style="@style/Widget.Material3.Button.TextButton"
+            android:layout_width="0dp"
+            android:layout_weight="1"
+            android:layout_height="wrap_content"
+            android:text="📐 격자 OFF"
+            android:textColor="@android:color/white"
+            android:textSize="11sp" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnMuteAudio"
+            style="@style/Widget.Material3.Button.TextButton"
+            android:layout_width="0dp"
+            android:layout_weight="1"
+            android:layout_height="wrap_content"
+            android:text="🎤 소리 켬"
+            android:textColor="@android:color/white"
+            android:textSize="11sp" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnMuteSound"
+            style="@style/Widget.Material3.Button.TextButton"
+            android:layout_width="0dp"
+            android:layout_weight="1"
+            android:layout_height="wrap_content"
+            android:text="🔊 무음 OFF"
+            android:textColor="@android:color/white"
+            android:textSize="11sp" />
+    </LinearLayout>
+
+    <!-- 실시간 렌즈 정보 및 타이머 오버레이 -->
     <TextView
         android:id="@+id/txtLensInfo"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_margin="16dp"
+        android:layout_marginStart="16dp"
+        android:layout_marginTop="12dp"
         android:background="#80000000"
-        android:padding="8dp"
+        android:padding="6dp"
         android:textColor="@android:color/white"
-        android:textSize="12sp"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toTopOf="parent" />
-
-    <com.google.android.material.button.MaterialButton
-        android:id="@+id/btnIgnoreBattery"
-        style="@style/Widget.Material3.Button.TonalButton"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_marginStart="8dp"
-        android:text="🔋 최적화 해제"
         android:textSize="10sp"
-        app:layout_constraintStart_toEndOf="@id/txtLensInfo"
-        app:layout_constraintTop_toTopOf="@id/txtLensInfo"
-        app:layout_constraintBottom_toBottomOf="@id/txtLensInfo" />
-
-    <com.google.android.material.button.MaterialButton
-        android:id="@+id/btnSettings"
-        style="@style/Widget.Material3.Button.IconButton"
-        android:layout_width="48dp"
-        android:layout_height="48dp"
-        android:layout_margin="12dp"
-        android:text="⚙"
-        android:textSize="20sp"
-        app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintTop_toTopOf="parent" />
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toBottomOf="@id/topQuickBar" />
 
     <TextView
         android:id="@+id/txtTimer"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_marginTop="16dp"
+        android:layout_marginTop="12dp"
         android:background="#80000000"
-        android:padding="8dp"
+        android:padding="6dp"
         android:text="00:00"
         android:textColor="@android:color/white"
-        android:textSize="18sp"
+        android:textSize="14sp"
+        android:textStyle="bold"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toTopOf="parent" />
+        app:layout_constraintTop_toBottomOf="@id/topQuickBar" />
 
+    <!-- 4. 화면 비율 조절 다이얼 (3:4 | 16:9 | Full) -->
+    <LinearLayout
+        android:id="@+id/ratioLayout"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:background="#99000000"
+        android:padding="4dp"
+        android:layout_marginBottom="8dp"
+        app:layout_constraintBottom_toTopOf="@id/zoomControlLayout"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent">
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnRatio34"
+            style="@style/Widget.Material3.Button.TextButton"
+            android:layout_width="54dp"
+            android:layout_height="36dp"
+            android:text="3:4"
+            android:textColor="#FFC107"
+            android:textSize="11sp"
+            android:insetTop="0dp"
+            android:insetBottom="0dp"
+            android:padding="0dp" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnRatio169"
+            style="@style/Widget.Material3.Button.TextButton"
+            android:layout_width="54dp"
+            android:layout_height="36dp"
+            android:text="16:9"
+            android:textColor="@android:color/white"
+            android:textSize="11sp"
+            android:insetTop="0dp"
+            android:insetBottom="0dp"
+            android:padding="0dp" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnRatioFull"
+            style="@style/Widget.Material3.Button.TextButton"
+            android:layout_width="54dp"
+            android:layout_height="36dp"
+            android:text="Full"
+            android:textColor="@android:color/white"
+            android:textSize="11sp"
+            android:insetTop="0dp"
+            android:insetBottom="0dp"
+            android:padding="0dp" />
+    </LinearLayout>
+
+    <!-- 5. 줌 조절 레이아웃 (갤럭시 스타일 둥근 캡슐 퀵버튼 위주) -->
     <LinearLayout
         android:id="@+id/zoomControlLayout"
         android:layout_width="0dp"
         android:layout_height="wrap_content"
         android:orientation="vertical"
-        android:padding="8dp"
-        android:background="#80000000"
+        android:padding="6dp"
+        android:background="#99000000"
         android:gravity="center"
+        android:layout_marginBottom="12dp"
         app:layout_constraintBottom_toTopOf="@id/lensChipGroup"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintEnd_toEndOf="parent"
-        android:layout_marginBottom="8dp">
+        app:layout_constraintEnd_toEndOf="parent">
 
         <LinearLayout
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:orientation="horizontal"
+            android:gravity="center"
+            android:background="#33FFFFFF"
+            android:padding="2dp"
             android:layout_marginBottom="4dp">
 
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btnZoom05"
-                style="@style/Widget.Material3.Button.ElevatedButton"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
+                style="@style/Widget.Material3.Button.TextButton"
+                android:layout_width="48dp"
+                android:layout_height="36dp"
                 android:text="0.5x"
+                android:textColor="@android:color/white"
                 android:textSize="11sp"
-                android:minHeight="0dp"
-                android:minWidth="0dp"
-                android:padding="8dp"
-                android:layout_marginEnd="8dp"/>
+                android:insetTop="0dp"
+                android:insetBottom="0dp"
+                android:padding="0dp" />
 
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btnZoom10"
-                style="@style/Widget.Material3.Button.ElevatedButton"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
+                style="@style/Widget.Material3.Button.TextButton"
+                android:layout_width="48dp"
+                android:layout_height="36dp"
                 android:text="1.0x"
+                android:textColor="#FFC107"
                 android:textSize="11sp"
-                android:minHeight="0dp"
-                android:minWidth="0dp"
-                android:padding="8dp"
-                android:layout_marginEnd="8dp"/>
+                android:insetTop="0dp"
+                android:insetBottom="0dp"
+                android:padding="0dp" />
 
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btnZoom20"
-                style="@style/Widget.Material3.Button.ElevatedButton"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
+                style="@style/Widget.Material3.Button.TextButton"
+                android:layout_width="48dp"
+                android:layout_height="36dp"
                 android:text="2.0x"
+                android:textColor="@android:color/white"
                 android:textSize="11sp"
-                android:minHeight="0dp"
-                android:minWidth="0dp"
-                android:padding="8dp" />
+                android:insetTop="0dp"
+                android:insetBottom="0dp"
+                android:padding="0dp" />
         </LinearLayout>
 
         <com.google.android.material.slider.Slider
@@ -125,56 +224,138 @@
             android:layout_height="wrap_content"
             android:valueFrom="1.0"
             android:valueTo="8.0"
-            android:value="1.0" />
+            android:value="1.0"
+            app:thumbColor="#FFC107"
+            app:trackColorActive="#FFC107" />
     </LinearLayout>
 
+    <!-- 물리적 다중 렌즈 리스트 -->
     <com.google.android.material.chip.ChipGroup
         android:id="@+id/lensChipGroup"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_marginBottom="16dp"
+        android:layout_marginBottom="12dp"
         android:background="#80000000"
-        android:padding="6dp"
+        android:padding="4dp"
         app:singleSelection="true"
-        app:layout_constraintBottom_toTopOf="@id/bottomBar"
+        app:layout_constraintBottom_toTopOf="@id/modeLayout"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent" />
 
+    <!-- 6. 촬영 / 동영상 모드 선택 레이아웃 -->
+    <LinearLayout
+        android:id="@+id/modeLayout"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:layout_marginBottom="16dp"
+        android:background="#80000000"
+        android:paddingHorizontal="16dp"
+        android:paddingVertical="6dp"
+        app:layout_constraintBottom_toTopOf="@id/bottomBar"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent">
+
+        <TextView
+            android:id="@+id/txtModePhoto"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="사진"
+            android:textColor="@android:color/white"
+            android:textSize="14sp"
+            android:textStyle="bold"
+            android:paddingEnd="24dp"
+            android:clickable="true"
+            android:focusable="true" />
+
+        <TextView
+            android:id="@+id/txtModeVideo"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="동영상"
+            android:textColor="#8AFFFFFF"
+            android:textSize="14sp"
+            android:textStyle="bold"
+            android:clickable="true"
+            android:focusable="true" />
+    </LinearLayout>
+
+    <!-- 7. 하단 바 제어 패널 (갤러리 보관함 ↔ 셔터 ↔ 전후 전환) -->
     <LinearLayout
         android:id="@+id/bottomBar"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="horizontal"
-        android:gravity="center_vertical"
+        android:gravity="center"
         android:padding="16dp"
-        android:background="#80000000"
+        android:background="#B3000000"
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent">
 
+        <!-- 비공개 보관함 원형 썸네일 버튼 -->
+        <com.google.android.material.card.MaterialCardView
+            android:id="@+id/btnPrivateVault"
+            android:layout_width="52dp"
+            android:layout_height="52dp"
+            android:layout_weight="0"
+            app:cardCornerRadius="26dp"
+            app:cardElevation="2dp"
+            app:strokeColor="#FFFFFF"
+            app:strokeWidth="1.5dp">
+
+            <ImageView
+                android:id="@+id/imgVaultThumbnail"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:scaleType="centerCrop"
+                android:src="@android:drawable/ic_secure"
+                android:background="#33FFFFFF"
+                android:padding="8dp" />
+        </com.google.android.material.card.MaterialCardView>
+
+        <!-- 갤럭시 스타일 셔터 버튼 (이중 원 애니메이션 구조) -->
+        <FrameLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_weight="1">
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnRecord"
+                style="@style/Widget.Material3.Button.IconButton"
+                android:layout_width="76dp"
+                android:layout_height="76dp"
+                android:layout_gravity="center"
+                android:background="@android:color/transparent"
+                app:icon="@null" />
+
+            <!-- 외곽 흰색 얇은 링 -->
+            <View
+                android:layout_width="72dp"
+                android:layout_height="72dp"
+                android:layout_gravity="center"
+                android:background="@drawable/shutter_ring" />
+
+            <!-- 내부 동그란 채우기 원 (사진: 흰색, 비디오: 빨간색) -->
+            <View
+                android:id="@+id/shutterCenter"
+                android:layout_width="56dp"
+                android:layout_height="56dp"
+                android:layout_gravity="center"
+                android:background="@drawable/shutter_center_video" />
+        </FrameLayout>
+
+        <!-- 전후면 전환 둥근 회 화살표 버튼 -->
         <com.google.android.material.button.MaterialButton
             android:id="@+id/btnSwitchFacing"
-            android:layout_width="0dp"
-            android:layout_weight="1"
-            android:layout_height="wrap_content"
-            android:text="전후 전환" />
-
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/btnRecord"
-            android:layout_width="72dp"
-            android:layout_height="72dp"
-            android:layout_marginHorizontal="16dp"
-            android:text="●"
-            android:textSize="28sp"
-            app:cornerRadius="36dp"
-            android:backgroundTint="@color/idle_gray" />
-
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/btnBackground"
-            android:layout_width="0dp"
-            android:layout_weight="1"
-            android:layout_height="wrap_content"
-            android:text="BG 시작" />
+            style="@style/Widget.Material3.Button.IconButton"
+            android:layout_width="52dp"
+            android:layout_height="52dp"
+            android:layout_weight="0"
+            android:text="🔄"
+            android:textSize="20sp"
+            android:textColor="@android:color/white"
+            android:backgroundTint="#33FFFFFF" />
     </LinearLayout>
 
 </androidx.constraintlayout.widget.ConstraintLayout>

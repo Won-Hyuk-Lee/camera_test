@@ -1,20 +1,23 @@
 package com.example.camera2study.ui
 
 import android.annotation.SuppressLint
-import android.content.ComponentName
 import android.content.Context
-import android.content.Intent
-import android.content.ServiceConnection
-import android.net.Uri
+import android.graphics.BitmapFactory
+import android.graphics.Color
+import android.media.ThumbnailUtils
 import android.os.Bundle
-import android.os.IBinder
-import android.os.PowerManager
+import android.os.CancellationSignal
+import android.os.Environment
+import android.os.Handler
+import android.os.Looper
 import android.os.SystemClock
-import android.provider.Settings
+import android.provider.MediaStore
+import android.util.Size
 import android.view.LayoutInflater
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
+import android.view.animation.ScaleAnimation
 import android.widget.Toast
 import androidx.camera.video.Quality
 import androidx.camera.video.VideoRecordEvent
@@ -26,36 +29,34 @@ import com.example.camera2study.R
 import com.example.camera2study.databinding.FragmentCameraBinding
 import com.example.camera2study.util.CameraUtils
 import com.google.android.material.chip.Chip
-import com.google.android.material.dialog.MaterialAlertDialogBuilder
+import java.io.File
 
 class CameraFragment : Fragment() {
 
     private var _binding: FragmentCameraBinding? = null
     private val binding get() = _binding!!
 
-    // 서비스 바인딩을 통해 획득할 컨트롤러
-    private lateinit var controller: CameraController
     private var service: CameraForegroundService? = null
+    private lateinit var controller: CameraController
     private var isBound = false
+
+    private var isPhotoMode: Boolean = true // 기본 사진 모드
 
     private var recordStartMs: Long = 0L
     private val timerRunnable = object : Runnable {
         override fun run() {
             if (!::controller.isInitialized) return
             val elapsed = SystemClock.elapsedRealtime() - recordStartMs
-            
-            // 반복 녹화 상황 시 타이머 표시 갱신 지원을 위해 현재 라운드 표시 추가
             val repeatStr = if (controller.maxRepeatCount > 1) {
                 " [${controller.currentRepeatCount + 1}/${controller.maxRepeatCount}]"
             } else ""
-            
             binding.txtTimer.text = formatElapsed(elapsed) + repeatStr
             binding.txtTimer.postDelayed(this, 200L)
         }
     }
 
-    private val serviceConnection = object : ServiceConnection {
-        override fun onServiceConnected(name: ComponentName?, binder: IBinder?) {
+    private val serviceConnection = object : android.content.ServiceConnection {
+        override fun onServiceConnected(name: android.content.ComponentName?, binder: android.os.IBinder?) {
             val localBinder = binder as CameraForegroundService.LocalBinder
             service = localBinder.service()
             controller = service!!.controller
@@ -69,19 +70,24 @@ class CameraFragment : Fragment() {
             // 프리뷰 뷰 부착
             controller.attachPreview(binding.previewView)
 
-            // UI 셋업
+            // UI 및 리스너 설정
             populateLensChips()
             setupZoomListeners()
             setupTouchToFocus()
-            checkBatteryOptimizationStatus()
+            setupRatioControls()
+            setupQuickControls()
+            updateThumbnail()
 
-            // 이미 서비스에서 녹화 중인 상태라면 UI 동기화
+            // 초기 모드 동기화 (기본 사진모드로 시작하되 녹화 중이면 비디오 동기화)
             if (controller.isRecording()) {
+                setVideoModeUi()
                 syncRecordingUi(true)
+            } else {
+                setPhotoModeUi()
             }
         }
 
-        override fun onServiceDisconnected(name: ComponentName?) {
+        override fun onServiceDisconnected(name: android.content.ComponentName?) {
             service = null
             isBound = false
         }
@@ -99,29 +105,110 @@ class CameraFragment : Fragment() {
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
 
-        // 백그라운드 서비스를 먼저 기동하고 바인딩 수행
+        // 백그라운드 서비스 바인딩
         val ctx = requireContext()
         CameraForegroundService.start(ctx)
-        
-        val intent = Intent(ctx, CameraForegroundService::class.java)
+        val intent = android.content.Intent(ctx, CameraForegroundService::class.java)
         ctx.bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE)
 
-        binding.btnSwitchFacing.setOnClickListener { 
-            if (::controller.isInitialized) controller.switchFacing() 
-        }
-        binding.btnSettings.setOnClickListener { openSettings() }
-        binding.btnRecord.setOnClickListener { toggleRecording() }
-        
-        binding.btnBackground.text = "BG 팁"
-        binding.btnBackground.setOnClickListener {
-            Toast.makeText(
-                requireContext(),
-                "녹화를 시작한 후 홈 버튼을 눌러도 백그라운드에서 녹화가 중단 없이 이어집니다.",
-                Toast.LENGTH_LONG
-            ).show()
+        binding.btnSwitchFacing.setOnClickListener {
+            if (::controller.isInitialized) {
+                val scale = ScaleAnimation(1f, 0.8f, 1f, 0.8f, ScaleAnimation.RELATIVE_TO_SELF, 0.5f, ScaleAnimation.RELATIVE_TO_SELF, 0.5f).apply {
+                    duration = 150
+                    repeatCount = 1
+                    repeatMode = ScaleAnimation.REVERSE
+                }
+                binding.btnSwitchFacing.startAnimation(scale)
+                controller.switchFacing()
+            }
         }
 
-        binding.btnIgnoreBattery.setOnClickListener { requestIgnoreBatteryOptimization() }
+        binding.btnSettings.setOnClickListener { openSettings() }
+
+        binding.btnPrivateVault.setOnClickListener {
+            navigateTo(PrivateVaultFragment())
+        }
+
+        binding.btnRecord.setOnClickListener {
+            handleShutterClick()
+        }
+
+        // 모드 탭 리스너
+        binding.txtModePhoto.setOnClickListener {
+            if (::controller.isInitialized && controller.isRecording()) return@setOnClickListener
+            setPhotoModeUi()
+        }
+
+        binding.txtModeVideo.setOnClickListener {
+            if (::controller.isInitialized && controller.isRecording()) return@setOnClickListener
+            setVideoModeUi()
+        }
+    }
+
+    private fun handleShutterClick() {
+        if (!::controller.isInitialized) return
+        if (isPhotoMode) {
+            // 1. 사진 촬영
+            animateShutterClick()
+            controller.takePicture(
+                onSuccess = { file ->
+                    activity?.runOnUiThread {
+                        Toast.makeText(requireContext(), "사진 촬영 완료 및 비공개 저장", Toast.LENGTH_SHORT).show()
+                        updateThumbnail()
+                    }
+                },
+                onError = { e ->
+                    activity?.runOnUiThread {
+                        Toast.makeText(requireContext(), "촬영 실패: ${e.message}", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            )
+        } else {
+            // 2. 동영상 녹화 토글
+            if (controller.isRecording()) {
+                controller.stopRecording()
+            } else {
+                controller.resetRepeatCount()
+                controller.startRecording()
+            }
+        }
+    }
+
+    private fun animateShutterClick() {
+        val animation = ScaleAnimation(
+            1.0f, 0.85f, 1.0f, 0.85f,
+            ScaleAnimation.RELATIVE_TO_SELF, 0.5f,
+            ScaleAnimation.RELATIVE_TO_SELF, 0.5f
+        ).apply {
+            duration = 100
+            repeatCount = 1
+            repeatMode = ScaleAnimation.REVERSE
+        }
+        binding.shutterCenter.startAnimation(animation)
+    }
+
+    private fun setPhotoModeUi() {
+        isPhotoMode = true
+        binding.txtModePhoto.setTextColor(Color.parseColor("#FFC107"))
+        binding.txtModeVideo.setTextColor(Color.parseColor("#8AFFFFFF"))
+        
+        binding.shutterCenter.setBackgroundResource(R.drawable.shutter_center_photo)
+        binding.btnMuteAudio.alpha = 0.3f
+        binding.btnMuteAudio.isEnabled = false
+
+        binding.txtTimer.visibility = View.INVISIBLE
+    }
+
+    private fun setVideoModeUi() {
+        isPhotoMode = false
+        binding.txtModePhoto.setTextColor(Color.parseColor("#8AFFFFFF"))
+        binding.txtModeVideo.setTextColor(Color.parseColor("#FFC107"))
+        
+        binding.shutterCenter.setBackgroundResource(R.drawable.shutter_center_video)
+        binding.btnMuteAudio.alpha = 1.0f
+        binding.btnMuteAudio.isEnabled = true
+
+        binding.txtTimer.visibility = View.VISIBLE
     }
 
     private fun populateLensChips() {
@@ -153,7 +240,7 @@ class CameraFragment : Fragment() {
         val focal = controller.backLenses.firstOrNull { it.cameraId == cameraId }?.focalLength
         val focalText = focal?.let { "%.1fmm".format(it) } ?: "-"
         val facing = if (controller.isFacingBack()) "후면" else "전면"
-        binding.txtLensInfo.text = "$facing  $focalText  ID:$cameraId"
+        binding.txtLensInfo.text = "$facing $focalText"
 
         for (i in 0 until binding.lensChipGroup.childCount) {
             val chip = binding.lensChipGroup.getChildAt(i) as? Chip ?: continue
@@ -185,9 +272,9 @@ class CameraFragment : Fragment() {
         binding.sliderZoom.valueTo = max
         binding.sliderZoom.value = current.coerceIn(binding.sliderZoom.valueFrom, max)
         
-        binding.btnZoom05.alpha = if (current <= 0.6f) 1.0f else 0.6f
-        binding.btnZoom10.alpha = if (current > 0.9f && current < 1.2f) 1.0f else 0.6f
-        binding.btnZoom20.alpha = if (current >= 1.9f && current < 2.2f) 1.0f else 0.6f
+        binding.btnZoom05.setTextColor(if (current <= 0.6f) Color.parseColor("#FFC107") else Color.WHITE)
+        binding.btnZoom10.setTextColor(if (current > 0.9f && current < 1.2f) Color.parseColor("#FFC107") else Color.WHITE)
+        binding.btnZoom20.setTextColor(if (current >= 1.9f && current < 2.2f) Color.parseColor("#FFC107") else Color.WHITE)
     }
 
     @SuppressLint("ClickableViewAccessibility")
@@ -203,28 +290,107 @@ class CameraFragment : Fragment() {
         }
     }
 
-    private fun checkBatteryOptimizationStatus() {
-        val pm = requireContext().getSystemService(Context.POWER_SERVICE) as PowerManager
-        val ignoring = pm.isIgnoringBatteryOptimizations(requireContext().packageName)
-        if (ignoring) {
-            binding.btnIgnoreBattery.visibility = View.GONE
-        } else {
-            binding.btnIgnoreBattery.visibility = View.VISIBLE
+    private fun setupRatioControls() {
+        binding.btnRatio34.setOnClickListener {
+            updateRatioSelection(CameraController.RATIO_3_4)
+        }
+        binding.btnRatio169.setOnClickListener {
+            updateRatioSelection(CameraController.RATIO_16_9)
+        }
+        binding.btnRatioFull.setOnClickListener {
+            updateRatioSelection(CameraController.RATIO_FULL)
+        }
+        // 초기 비율 버튼 색상 셋업
+        updateRatioSelection(controller.currentRatioMode)
+    }
+
+    private fun updateRatioSelection(mode: Int) {
+        if (!::controller.isInitialized) return
+        controller.currentRatioMode = mode
+        
+        binding.btnRatio34.setTextColor(if (mode == CameraController.RATIO_3_4) Color.parseColor("#FFC107") else Color.WHITE)
+        binding.btnRatio169.setTextColor(if (mode == CameraController.RATIO_16_9) Color.parseColor("#FFC107") else Color.WHITE)
+        binding.btnRatioFull.setTextColor(if (mode == CameraController.RATIO_FULL) Color.parseColor("#FFC107") else Color.WHITE)
+
+        // PreviewView 종횡비 시각적 조절
+        val params = binding.previewView.layoutParams as ViewGroup.MarginLayoutParams
+        when (mode) {
+            CameraController.RATIO_3_4 -> {
+                params.width = ViewGroup.LayoutParams.MATCH_PARENT
+                params.height = (binding.previewView.width * 4) / 3
+            }
+            CameraController.RATIO_16_9 -> {
+                params.width = ViewGroup.LayoutParams.MATCH_PARENT
+                params.height = (binding.previewView.width * 16) / 9
+            }
+            CameraController.RATIO_FULL -> {
+                params.width = ViewGroup.LayoutParams.MATCH_PARENT
+                params.height = ViewGroup.LayoutParams.MATCH_PARENT
+            }
+        }
+        binding.previewView.layoutParams = params
+    }
+
+    private fun setupQuickControls() {
+        // 1. 격자 토글
+        binding.btnGridToggle.setOnClickListener {
+            val visible = binding.gridOverlayView.visibility == View.VISIBLE
+            binding.gridOverlayView.visibility = if (visible) View.GONE else View.VISIBLE
+            binding.btnGridToggle.text = if (visible) "📐 격자 OFF" else "📐 격자 ON"
+            binding.btnGridToggle.setTextColor(if (visible) Color.WHITE else Color.parseColor("#FFC107"))
+        }
+
+        // 2. 마이크 토글
+        binding.btnMuteAudio.setOnClickListener {
+            controller.isAudioMuted = !controller.isAudioMuted
+            val muted = controller.isAudioMuted
+            binding.btnMuteAudio.text = if (muted) "🔇 소리 끔" else "🎤 소리 켬"
+            binding.btnMuteAudio.setTextColor(if (muted) Color.parseColor("#FF5252") else Color.WHITE)
+        }
+
+        // 3. 무음 토글
+        binding.btnMuteSound.setOnClickListener {
+            controller.isMuteSound = !controller.isMuteSound
+            val mute = controller.isMuteSound
+            binding.btnMuteSound.text = if (mute) "🔇 무음 ON" else "🔊 무음 OFF"
+            binding.btnMuteSound.setTextColor(if (mute) Color.parseColor("#FFC107") else Color.WHITE)
         }
     }
 
-    private fun requestIgnoreBatteryOptimization() {
-        MaterialAlertDialogBuilder(requireContext())
-            .setTitle("배터리 최적화 해제 필요")
-            .setMessage("백그라운드에서 장시간 안정적으로 녹화를 계속 수행하려면 배터리 최적화 예외 설정이 필수적입니다. 설정 화면으로 이동하시겠습니까?")
-            .setPositiveButton("이동") { _, _ ->
-                val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
-                    data = Uri.parse("package:${requireContext().packageName}")
+    private fun updateThumbnail() {
+        val ctx = context ?: return
+        val privateDir = File(ctx.getExternalFilesDir(null), "private_vault")
+        if (!privateDir.exists()) return
+
+        val files = privateDir.listFiles()?.filter { it.isFile && it.name != ".nomedia" }
+        if (files.isNullOrEmpty()) {
+            binding.imgVaultThumbnail.setImageResource(android.R.drawable.ic_lock_lock)
+            binding.imgVaultThumbnail.setPadding(8, 8, 8, 8)
+            return
+        }
+
+        val latest = files.maxByOrNull { it.lastModified() } ?: return
+
+        try {
+            binding.imgVaultThumbnail.setPadding(0, 0, 0, 0)
+            if (latest.name.endsWith(".jpg")) {
+                val bitmap = BitmapFactory.decodeFile(latest.absolutePath)
+                binding.imgVaultThumbnail.setImageBitmap(bitmap)
+            } else if (latest.name.endsWith(".mp4")) {
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+                    val bitmap = ThumbnailUtils.createVideoThumbnail(latest, Size(96, 96), CancellationSignal())
+                    binding.imgVaultThumbnail.setImageBitmap(bitmap)
+                } else {
+                    @Suppress("DEPRECATION")
+                    val bitmap = ThumbnailUtils.createVideoThumbnail(latest.absolutePath, MediaStore.Images.Thumbnails.MINI_KIND)
+                    binding.imgVaultThumbnail.setImageBitmap(bitmap)
                 }
-                startActivity(intent)
             }
-            .setNegativeButton("취소", null)
-            .show()
+        } catch (e: Exception) {
+            e.printStackTrace()
+            binding.imgVaultThumbnail.setImageResource(android.R.drawable.ic_lock_lock)
+            binding.imgVaultThumbnail.setPadding(8, 8, 8, 8)
+        }
     }
 
     private fun openSettings() {
@@ -269,31 +435,36 @@ class CameraFragment : Fragment() {
         sheet.show(parentFragmentManager, "settings")
     }
 
-    private fun toggleRecording() {
-        if (!::controller.isInitialized) return
-        if (controller.isRecording()) {
-            controller.stopRecording()
-        } else {
-            controller.resetRepeatCount()
-            controller.startRecording()
-        }
-    }
-
     private fun syncRecordingUi(isRecording: Boolean) {
         if (isRecording) {
             recordStartMs = SystemClock.elapsedRealtime()
             binding.txtTimer.post(timerRunnable)
-            binding.btnRecord.text = "■"
-            binding.btnRecord.setBackgroundColor(
-                ContextCompat.getColor(requireContext(), R.color.recording_red)
-            )
+            
+            // 녹화 작동 셔터 변형 애니메이션 (둥근 빨간 채우기가 살짝 사각형처럼 축소)
+            val animation = ScaleAnimation(
+                1.0f, 0.6f, 1.0f, 0.6f,
+                ScaleAnimation.RELATIVE_TO_SELF, 0.5f,
+                ScaleAnimation.RELATIVE_TO_SELF, 0.5f
+            ).apply {
+                duration = 200
+                fillAfter = true
+            }
+            binding.shutterCenter.startAnimation(animation)
         } else {
             binding.txtTimer.removeCallbacks(timerRunnable)
             binding.txtTimer.text = "00:00"
-            binding.btnRecord.text = "●"
-            binding.btnRecord.setBackgroundColor(
-                ContextCompat.getColor(requireContext(), R.color.idle_gray)
-            )
+            binding.shutterCenter.clearAnimation()
+            
+            // 원래 둥근 원 복원
+            val animation = ScaleAnimation(
+                0.6f, 1.0f, 0.6f, 1.0f,
+                ScaleAnimation.RELATIVE_TO_SELF, 0.5f,
+                ScaleAnimation.RELATIVE_TO_SELF, 0.5f
+            ).apply {
+                duration = 200
+                fillAfter = true
+            }
+            binding.shutterCenter.startAnimation(animation)
         }
     }
 
@@ -318,10 +489,11 @@ class CameraFragment : Fragment() {
                 } else {
                     Toast.makeText(
                         requireContext(),
-                        "저장 완료",
+                        "비공개 보관함에 비디오가 저장되었습니다.",
                         Toast.LENGTH_SHORT
                     ).show()
                 }
+                updateThumbnail()
             }
             else -> Unit
         }
@@ -334,9 +506,11 @@ class CameraFragment : Fragment() {
         return "%02d:%02d".format(m, s)
     }
 
-    override fun onResume() {
-        super.onResume()
-        checkBatteryOptimizationStatus()
+    private fun navigateTo(fragment: Fragment) {
+        parentFragmentManager.beginTransaction()
+            .replace(R.id.container, fragment)
+            .addToBackStack(null)
+            .commit()
     }
 
     override fun onDestroyView() {

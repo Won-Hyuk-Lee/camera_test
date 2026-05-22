@@ -89,6 +89,15 @@ class SettingsBottomSheet : BottomSheetDialogFragment() {
         setupVideoSettings()
     }
 
+    override fun onStart() {
+        super.onStart()
+        // 바텀시트가 열릴 때 하단 부가기능이 숨겨지지 않도록 완전히 STATE_EXPANDED 상태로 강제 확장합니다.
+        val dialog = dialog as? com.google.android.material.bottomsheet.BottomSheetDialog ?: return
+        val bottomSheet = dialog.findViewById<View>(com.google.android.material.R.id.design_bottom_sheet) ?: return
+        val behavior = com.google.android.material.bottomsheet.BottomSheetBehavior.from(bottomSheet)
+        behavior.state = com.google.android.material.bottomsheet.BottomSheetBehavior.STATE_EXPANDED
+    }
+
     private fun setupAwbSpinner() {
         val adapter = ArrayAdapter(
             requireContext(),
