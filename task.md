@@ -1,158 +1,48 @@
-# Camera2 API 학습용 Android 앱 (Debug Build)
+# Camera2 API 학습용 Android 앱 작업 목록
 
-## 프로젝트 개요
-- 목적 Camera2 API + CameraX Camera2Interop 학습용 앱
-- 빌드 타겟 Debug APK (로컬 설치용)
-- 언어 Kotlin
-- 최소 SDK API 26 (Android 8.0)
-- 타겟 SDK API 34
+## 📌 전체 진행 상황
+- [ ] 1단계: 백그라운드 녹화 중단 문제 해결 및 구조 개편 (#1)
+- [ ] 2단계: 광각 카메라 및 자동 초점(Continuous AF + Tap to Focus) 개선 (#2)
+- [ ] 3단계: 배터리 최적화 해제, 영상 품질, 최대 시간/반복, 알림창 즉시 종료 구현 (#3)
 
 ---
 
-## 기술 스택
-- Android Studio (최신 stable)
-- Kotlin
-- CameraX (`camera-video`, `camera-camera2`)
-- Camera2Interop (CameraX → Camera2 파라미터 주입)
-- ForegroundService (백그라운드 녹화)
-- ViewBinding
+## 🛠 세부 작업 체크리스트
 
----
+### 1단계: 백그라운드 녹화 중단 문제 해결 (#1)
+- [ ] `CameraForegroundService` 리팩토링
+  - [ ] `LifecycleService` 수명주기를 `CameraController`로 이관하여 서비스가 카메라 인스턴스 소유하게 변경
+  - [ ] 서비스가 직접 프로세스 바인딩을 관리하도록 구현
+  - [ ] UI가 없을 때(백그라운드)에도 캡처 세션이 죽지 않는 안정적인 생명주기 관리 설계
+- [ ] `CameraController` 리팩토링
+  - [ ] `LifecycleOwner`와 `PreviewView`를 동적으로 결합 및 분리(`attachPreview`/`detachPreview`)할 수 있도록 로직 수정
+- [ ] `CameraFragment`와 `Service` 바인딩 연동
+  - [ ] `bindService`를 사용해 서비스 연결 관리
+  - [ ] 프래그먼트 진입 시 서비스에 바인딩하고, 화면 프리뷰를 주입
+  - [ ] 앱이 화면에서 사라지거나 파괴되어도 카메라 캡처 세션을 종료하지 않고 유지
 
-## 구현 기능 목록
+### 2단계: 광각 카메라 및 자동 초점 개선 (#2)
+- [ ] 광각 전환 방식 보완 (배율 제어)
+  - [ ] `camera.cameraControl.setZoomRatio()` 기능 구현
+  - [ ] UI에 줌 배율 제어 슬라이더(`Slider`) 배치
+  - [ ] `0.5x`(광각), `1x`(기본), `2x`(망원) 퀵 줌 제어 버튼 도입
+- [ ] 자동 초점(AF) 개선
+  - [ ] `CaptureRequest.CONTROL_AF_MODE`를 `CONTROL_AF_MODE_CONTINUOUS_VIDEO`로 강제 주입하여 촬영 중 상시 포커싱 보장
+  - [ ] `PreviewView`에 터치 리스너 연결 및 좌표 계산
+  - [ ] `FocusMeteringAction`을 통해 클릭 영역에 즉시 초점을 맞추는 **Tap to Focus(원터치 초점)** 구현 및 UI 피드백 제공
 
-### 1. 기본 프리뷰
-- [ ] `PreviewView`로 카메라 실시간 프리뷰 출력
-- [ ] 전후면 카메라 전환 버튼
-
-### 2. 광각 전환
-- [ ] 기기에서 사용 가능한 카메라 렌즈 목록 조회 (`CameraManager.getCameraIdList`)
-- [ ] 광각(LENS_FACING_BACK, 초점거리 짧은 것) 전환 버튼
-- [ ] 현재 활성 렌즈 표시 UI
-
-### 3. 수동 카메라 파라미터 제어 (Camera2Interop)
-- [ ] AWB(자동 화이트밸런스) 모드 선택
-  - AUTO  CLOUDY_DAYLIGHT  FLUORESCENT  INCANDESCENT  DAYLIGHT
-- [ ] 화이트밸런스 수동 색온도 설정 (AWB OFF 시 Color Correction 적용)
-- [ ] 조리개(F값) 표시 (하드웨어 지원 여부 체크 후 가변이면 제어 UI 노출)
-- [ ] 셔터스피드(노출 시간) 수동 조정 슬라이더
-
-### 4. 동영상 녹화
-- [ ] CameraX `VideoCapture` + `Recorder` 기반 녹화
-- [ ] 녹화 시작정지 버튼
-- [ ] 촬영 시간 타이머 표시 (UI)
-- [ ] 저장 경로 `MediaStore` (갤러리 저장)
-
-### 5. 백그라운드 녹화 (ForegroundService)
-- [ ] `CameraForegroundService` 구현
-  - `Service`를 `LifecycleOwner`로 등록 (`LifecycleService` 사용)
-  - CameraX ProcessCameraProvider 바인딩
-  - Notification 표시 (Android 요구사항)
-- [ ] 앱 화면 닫아도 녹화 유지
-- [ ] 서비스 시작종료 시 녹화 자동 연동
-- [ ] 상태바 Privacy Indicator (초록 점) 동작 확인용 테스트
-
----
-
-## 프로젝트 구조
-```
-app
-├── srcmain
-│   ├── javacomexamplecamera2study
-│   │   ├── MainActivity.kt               # 메인 액티비티, 권한 처리
-│   │   ├── CameraController.kt           # CameraX + Camera2Interop 래퍼
-│   │   ├── CameraForegroundService.kt    # 백그라운드 녹화 서비스
-│   │   ├── ui
-│   │   │   ├── CameraFragment.kt         # 카메라 프리뷰 + 컨트롤 UI
-│   │   │   └── SettingsBottomSheet.kt    # AWB파라미터 설정 BottomSheet
-│   │   └── util
-│   │       ├── CameraUtils.kt            # 렌즈 목록, 지원 기능 체크 유틸
-│   │       └── PermissionHelper.kt       # 권한 요청 헬퍼
-│   ├── res
-│   │   ├── layout
-│   │   │   ├── activity_main.xml
-│   │   │   ├── fragment_camera.xml
-│   │   │   └── bottom_sheet_settings.xml
-│   │   └── values
-│   └── AndroidManifest.xml
-└── build.gradle.kts
-```
-
----
-
-## AndroidManifest 필요 권한
-```xml
-uses-permission androidname=android.permission.CAMERA 
-uses-permission androidname=android.permission.RECORD_AUDIO 
-uses-permission androidname=android.permission.FOREGROUND_SERVICE 
-uses-permission androidname=android.permission.FOREGROUND_SERVICE_CAMERA 
-uses-permission androidname=android.permission.POST_NOTIFICATIONS 
-```
-
----
-
-## build.gradle.kts 주요 의존성
-```kotlin
-val cameraxVersion = 1.3.4
-
-dependencies {
-    implementation(androidx.cameracamera-core$cameraxVersion)
-    implementation(androidx.cameracamera-camera2$cameraxVersion)
-    implementation(androidx.cameracamera-lifecycle$cameraxVersion)
-    implementation(androidx.cameracamera-video$cameraxVersion)
-    implementation(androidx.cameracamera-view$cameraxVersion)
-    implementation(androidx.lifecyclelifecycle-service2.7.0)
-}
-```
-
----
-
-## 핵심 구현 포인트 (학습 체크리스트)
-
-### Camera2Interop AWB 설정 예시
-```kotlin
-val camera2Interop = Camera2Interop.Extender(videoCaptureBuilder)
-camera2Interop.setCaptureRequestOption(
-    CaptureRequest.CONTROL_AWB_MODE,
-    CameraMetadata.CONTROL_AWB_MODE_CLOUDY_DAYLIGHT
-)
-```
-
-### ForegroundService LifecycleOwner 등록
-```kotlin
-class CameraForegroundService  LifecycleService() {
-    override fun onCreate() {
-        super.onCreate()
-         ProcessCameraProvider.getInstance(this) 바인딩
-         this (LifecycleService) 를 lifecycleOwner로 사용
-    }
-}
-```
-
-### 조리개 지원 여부 체크
-```kotlin
-val characteristics = cameraManager.getCameraCharacteristics(cameraId)
-val apertures = characteristics.get(CameraCharacteristics.LENS_INFO_AVAILABLE_APERTURES)
- null이거나 size == 1이면 고정 조리개 → UI 비활성화
-```
-
----
-
-## Debug 빌드 & 설치 방법
-```bash
-# 프로젝트 루트에서
-.gradlew assembleDebug
-
-# APK 경로
-appbuildoutputsapkdebugapp-debug.apk
-
-# ADB로 직접 설치 (폰 연결 후)
-adb install appbuildoutputsapkdebugapp-debug.apk
-```
-
-또는 Android Studio에서 `Run ▶` 버튼으로 직접 디바이스에 설치.
-
----
-
-## 학습 순서 권장
-1. 기본 프리뷰 → 2. 동영상 녹화 → 3. Camera2Interop 파라미터 → 4. 광각 전환 → 5. ForegroundService 백그라운드 녹화
+### 3단계: 배터리 최적화 해제 및 신규 부가 기능 탑재 (#3)
+- [ ] 배터리 최적화 해제 (`Ignore Battery Optimizations`) 연동
+  - [ ] `AndroidManifest.xml`에 `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` 권한 추가
+  - [ ] 앱 시작 시 해제 여부 판단 및 시스템 최적화 예외 다이얼로그 호출 로직 연동
+- [ ] 최대 녹화 시간 & 반복 녹화 구현
+  - [ ] 설정 BottomSheet에 최대 녹화 시간 선택 스피너 추가 (제한 없음, 10초(테스트), 1분, 5분, 10분)
+  - [ ] 설정 BottomSheet에 반복 횟수 선택 스피너 추가 (1회, 3회, 5회, 무한)
+  - [ ] 녹화 파일 완료 시(`VideoRecordEvent.Finalize`) 남은 횟수가 있고 한계 도달로 종료되었다면 릴레이식 재녹화 자동 시작
+- [ ] 영상 품질 선택 및 파일 크기 최적화
+  - [ ] 설정 BottomSheet에 품질 스피너 추가 (`UHD`, `FHD`, `HD`, `SD`)
+  - [ ] 품질 선택에 따라 `QualitySelector`를 다르게 하여 CameraX Video Recorder 생성
+  - [ ] 파일 용량을 극도로 아끼기 위한 SD/HD 지원 및 비트레이트 조절
+- [ ] 알림창 강제 종료 버튼 구현
+  - [ ] `CameraForegroundService`의 알림(Notification) 레이아웃에 `녹화 종료` 액션 버튼 삽입
+  - [ ] 브로드캐스트 리시버(`NotificationActionReceiver`) 또는 PendingIntent를 통해 알림 클릭 시 백그라운드 녹화를 안전하게 중단하고 서비스 정지(`stopSelf`)

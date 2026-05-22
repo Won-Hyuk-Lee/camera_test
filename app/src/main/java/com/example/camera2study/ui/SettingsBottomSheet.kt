@@ -9,6 +9,7 @@ import android.widget.AdapterView
 import android.widget.ArrayAdapter
 import com.example.camera2study.databinding.BottomSheetSettingsBinding
 import com.google.android.material.bottomsheet.BottomSheetDialogFragment
+import androidx.camera.video.Quality
 
 class SettingsBottomSheet : BottomSheetDialogFragment() {
 
@@ -17,6 +18,10 @@ class SettingsBottomSheet : BottomSheetDialogFragment() {
         fun onWbGains(gains: FloatArray?)
         fun onExposureTime(ns: Long?)
         fun onAperture(v: Float?)
+        fun onQuality(quality: Quality)
+        fun onMaxDuration(ms: Long)
+        fun onMaxRepeatCount(count: Int)
+        fun onFileSizeOptimization(enabled: Boolean)
     }
 
     private var _binding: BottomSheetSettingsBinding? = null
@@ -27,6 +32,12 @@ class SettingsBottomSheet : BottomSheetDialogFragment() {
     private var apertures: FloatArray? = null
     private var variableAperture: Boolean = false
 
+    // 초기 상태 값 복원용
+    private var initialQuality: Quality = Quality.HD
+    private var initialMaxDurationMs: Long = 0L
+    private var initialMaxRepeatCount: Int = 1
+    private var initialFileSizeOpt: Boolean = false
+
     private val awbOptions = listOf(
         "AUTO" to CameraMetadata.CONTROL_AWB_MODE_AUTO,
         "DAYLIGHT" to CameraMetadata.CONTROL_AWB_MODE_DAYLIGHT,
@@ -34,6 +45,28 @@ class SettingsBottomSheet : BottomSheetDialogFragment() {
         "FLUORESCENT" to CameraMetadata.CONTROL_AWB_MODE_FLUORESCENT,
         "INCANDESCENT" to CameraMetadata.CONTROL_AWB_MODE_INCANDESCENT,
         "OFF (수동)" to CameraMetadata.CONTROL_AWB_MODE_OFF
+    )
+
+    private val qualityOptions = listOf(
+        "UHD (4K)" to Quality.UHD,
+        "FHD (1080P)" to Quality.FHD,
+        "HD (720P)" to Quality.HD,
+        "SD (480P)" to Quality.SD
+    )
+
+    private val durationOptions = listOf(
+        "제한 없음" to 0L,
+        "10초 (테스트)" to 10_000L,
+        "1분" to 60_000L,
+        "5분" to 300_000L,
+        "10분" to 600_000L
+    )
+
+    private val repeatOptions = listOf(
+        "1회 (반복 없음)" to 1,
+        "3회" to 3,
+        "5회" to 5,
+        "무한 반복" to 999
     )
 
     override fun onCreateView(
@@ -51,6 +84,9 @@ class SettingsBottomSheet : BottomSheetDialogFragment() {
         setupColorTempSlider()
         setupExposureSlider()
         setupApertureSlider()
+
+        // 신규 스피너 및 스위치 설정
+        setupVideoSettings()
     }
 
     private fun setupAwbSpinner() {
@@ -140,6 +176,62 @@ class SettingsBottomSheet : BottomSheetDialogFragment() {
         }
     }
 
+    private fun setupVideoSettings() {
+        // 1. 영상 품질 스피너
+        val qualityAdapter = ArrayAdapter(
+            requireContext(),
+            android.R.layout.simple_spinner_dropdown_item,
+            qualityOptions.map { it.first }
+        )
+        binding.spinnerQuality.adapter = qualityAdapter
+        val qIdx = qualityOptions.indexOfFirst { it.second == initialQuality }.coerceAtLeast(0)
+        binding.spinnerQuality.setSelection(qIdx)
+        binding.spinnerQuality.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                callbacks?.onQuality(qualityOptions[position].second)
+            }
+            override fun onNothingSelected(p0: AdapterView<*>?) {}
+        }
+
+        // 2. 최대 녹화 시간 스피너
+        val durationAdapter = ArrayAdapter(
+            requireContext(),
+            android.R.layout.simple_spinner_dropdown_item,
+            durationOptions.map { it.first }
+        )
+        binding.spinnerMaxDuration.adapter = durationAdapter
+        val dIdx = durationOptions.indexOfFirst { it.second == initialMaxDurationMs }.coerceAtLeast(0)
+        binding.spinnerMaxDuration.setSelection(dIdx)
+        binding.spinnerMaxDuration.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                callbacks?.onMaxDuration(durationOptions[position].second)
+            }
+            override fun onNothingSelected(p0: AdapterView<*>?) {}
+        }
+
+        // 3. 반복 녹화 횟수 스피너
+        val repeatAdapter = ArrayAdapter(
+            requireContext(),
+            android.R.layout.simple_spinner_dropdown_item,
+            repeatOptions.map { it.first }
+        )
+        binding.spinnerRepeatCount.adapter = repeatAdapter
+        val rIdx = repeatOptions.indexOfFirst { it.second == initialMaxRepeatCount }.coerceAtLeast(0)
+        binding.spinnerRepeatCount.setSelection(rIdx)
+        binding.spinnerRepeatCount.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                callbacks?.onMaxRepeatCount(repeatOptions[position].second)
+            }
+            override fun onNothingSelected(p0: AdapterView<*>?) {}
+        }
+
+        // 4. 파일 크기 최적화 스위치
+        binding.switchOptimization.isChecked = initialFileSizeOpt
+        binding.switchOptimization.setOnCheckedChangeListener { _, isChecked ->
+            callbacks?.onFileSizeOptimization(isChecked)
+        }
+    }
+
     private fun formatShutter(ns: Long): String {
         val seconds = ns / 1_000_000_000.0
         return if (seconds >= 1.0) "%.1fs".format(seconds)
@@ -176,11 +268,19 @@ class SettingsBottomSheet : BottomSheetDialogFragment() {
             exposureRangeNs: LongRange?,
             apertures: FloatArray?,
             variableAperture: Boolean,
+            currentQuality: Quality,
+            currentMaxDurationMs: Long,
+            currentMaxRepeatCount: Int,
+            currentFileSizeOpt: Boolean,
             callbacks: Callbacks
         ): SettingsBottomSheet = SettingsBottomSheet().also {
             it.exposureRangeNs = exposureRangeNs
             it.apertures = apertures
             it.variableAperture = variableAperture
+            it.initialQuality = currentQuality
+            it.initialMaxDurationMs = currentMaxDurationMs
+            it.initialMaxRepeatCount = currentMaxRepeatCount
+            it.initialFileSizeOpt = currentFileSizeOpt
             it.callbacks = callbacks
         }
     }
