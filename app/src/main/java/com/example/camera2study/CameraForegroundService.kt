@@ -16,7 +16,8 @@ import androidx.lifecycle.LifecycleService
 class CameraForegroundService : LifecycleService() {
 
     private val binder = LocalBinder()
-    private var controller: CameraController? = null
+    lateinit var controller: CameraController
+        private set
 
     inner class LocalBinder : Binder() {
         fun service(): CameraForegroundService = this@CameraForegroundService
@@ -24,6 +25,11 @@ class CameraForegroundService : LifecycleService() {
 
     override fun onCreate() {
         super.onCreate()
+        
+        // 서비스 수명 주기를 갖는 CameraController 생성 및 바인딩
+        controller = CameraController(applicationContext)
+        controller.init(this)
+        
         ensureChannel()
         val notification = buildNotification()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
@@ -40,30 +46,27 @@ class CameraForegroundService : LifecycleService() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         super.onStartCommand(intent, flags, startId)
+        
+        // 알림창에서 강제종료 버튼 수신 처리
+        if (intent?.action == ACTION_STOP_RECORDING) {
+            stopBackgroundRecording()
+            stopSelf()
+        }
+        
         return START_STICKY
     }
 
     override fun onDestroy() {
-        controller?.stopRecording()
-        controller?.release()
-        controller = null
+        controller.release()
         super.onDestroy()
     }
 
-    fun attachController(c: CameraController) {
-        controller = c
-    }
-
-    fun detachController() {
-        controller = null
-    }
-
     fun startBackgroundRecording() {
-        controller?.startRecording()
+        controller.startRecording()
     }
 
     fun stopBackgroundRecording() {
-        controller?.stopRecording()
+        controller.stopRecording()
     }
 
     private fun ensureChannel() {
@@ -87,18 +90,35 @@ class CameraForegroundService : LifecycleService() {
             Intent(this, MainActivity::class.java),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
+
+        val stopIntent = Intent(this, CameraForegroundService::class.java).apply {
+            action = ACTION_STOP_RECORDING
+        }
+        val stopPendingIntent = PendingIntent.getService(
+            this,
+            1,
+            stopIntent,
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("백그라운드 녹화")
             .setContentText("Camera2Study 가 카메라를 사용 중입니다")
             .setSmallIcon(android.R.drawable.ic_menu_camera)
             .setOngoing(true)
             .setContentIntent(pi)
+            .addAction(
+                android.R.drawable.ic_menu_close_clear_cancel,
+                "녹화 종료",
+                stopPendingIntent
+            )
             .build()
     }
 
     companion object {
         const val NOTI_ID = 1001
         const val CHANNEL_ID = "camera_recording_channel"
+        const val ACTION_STOP_RECORDING = "com.example.camera2study.ACTION_STOP_RECORDING"
 
         fun start(context: Context) {
             val intent = Intent(context, CameraForegroundService::class.java)
