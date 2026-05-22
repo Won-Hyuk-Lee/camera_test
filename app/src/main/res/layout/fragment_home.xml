@@ -1,0 +1,283 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.constraintlayout.widget.ConstraintLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@android:color/black"
+    android:padding="20dp"
+    android:fitsSystemWindows="true">
+
+    <TextView
+        android:id="@+id/txtAppTitle"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="40dp"
+        android:text="🔒 STUDY VAULT CAMERA"
+        android:textColor="@android:color/white"
+        android:textSize="22sp"
+        android:textStyle="bold"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toTopOf="parent" />
+
+    <TextView
+        android:id="@+id/txtSubTitle"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:text="학습용 비공개 촬영 어플리케이션"
+        android:textColor="#8AFFFFFF"
+        android:textSize="12sp"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toBottomOf="@id/txtAppTitle" />
+
+    <!-- 배터리 최적화 예고 경고 카드 -->
+    <com.google.android.material.card.MaterialCardView
+        android:id="@+id/cardBatteryWarning"
+        style="@style/Widget.Material3.CardView.Elevated"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="32dp"
+        app:cardBackgroundColor="#4DFF5252"
+        app:cardCornerRadius="16dp"
+        app:strokeColor="#FF5252"
+        app:strokeWidth="1.5dp"
+        android:visibility="gone"
+        app:layout_constraintTop_toBottomOf="@id/txtSubTitle">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:padding="16dp">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="🔋 배터리 최적화 제한 상태"
+                android:textColor="#FFFFD2D2"
+                android:textSize="14sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:text="백그라운드에서 녹화 시 오류가 발생할 수 있습니다. 정상 동작을 위해 배터리 최적화를 해제해 주세요."
+                android:textColor="#E6FFFFFF"
+                android:textSize="11sp" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnFixBattery"
+                style="@style/Widget.Material3.Button.TextButton"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="end"
+                android:layout_marginTop="4dp"
+                android:text="지금 해제하기 →"
+                android:textColor="#FFFFD2D2"
+                android:textSize="11sp" />
+        </LinearLayout>
+    </com.google.android.material.card.MaterialCardView>
+
+    <!-- 권한 부족 경고 카드 -->
+    <com.google.android.material.card.MaterialCardView
+        android:id="@+id/cardPermissionWarning"
+        style="@style/Widget.Material3.CardView.Elevated"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="12dp"
+        app:cardBackgroundColor="#4DFFC107"
+        app:cardCornerRadius="16dp"
+        app:strokeColor="#FFC107"
+        app:strokeWidth="1.5dp"
+        android:visibility="gone"
+        app:layout_constraintTop_toBottomOf="@id/cardBatteryWarning">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:padding="16dp">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="⚠️ 필수 권한 누락"
+                android:textColor="#FFFFE082"
+                android:textSize="14sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:text="카메라 촬영을 위해 필수 권한(카메라, 마이크 등) 허용이 필요합니다."
+                android:textColor="#E6FFFFFF"
+                android:textSize="11sp" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnFixPermissions"
+                style="@style/Widget.Material3.Button.TextButton"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="end"
+                android:layout_marginTop="4dp"
+                android:text="권한 허용하러 가기 →"
+                android:textColor="#FFFFE082"
+                android:textSize="11sp" />
+        </LinearLayout>
+    </com.google.android.material.card.MaterialCardView>
+
+    <!-- 촬영 시작 카드 -->
+    <com.google.android.material.card.MaterialCardView
+        android:id="@+id/cardStartCamera"
+        style="@style/Widget.Material3.CardView.Filled"
+        android:layout_width="match_parent"
+        android:layout_height="120dp"
+        android:layout_marginTop="20dp"
+        app:cardBackgroundColor="#1AFFFFFF"
+        app:cardCornerRadius="20dp"
+        app:strokeColor="#33FFFFFF"
+        app:strokeWidth="1dp"
+        app:layout_constraintTop_toBottomOf="@id/cardPermissionWarning">
+
+        <RelativeLayout
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:padding="20dp">
+
+            <TextView
+                android:id="@+id/lblCamera"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="📸 촬영 시작 (Start Camera)"
+                android:textColor="@android:color/white"
+                android:textSize="18sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_below="@id/lblCamera"
+                android:layout_marginTop="8dp"
+                android:text="갤럭시 기본 카메라 스타일 UI 및 다양한 비율 촬영"
+                android:textColor="#8AFFFFFF"
+                android:textSize="12sp" />
+
+            <ImageView
+                android:layout_width="32dp"
+                android:layout_height="32dp"
+                android:layout_alignParentEnd="true"
+                android:layout_centerVertical="true"
+                android:src="@android:drawable/ic_menu_camera"
+                app:tint="@android:color/white" />
+        </RelativeLayout>
+    </com.google.android.material.card.MaterialCardView>
+
+    <!-- 비공개 보관함 카드 -->
+    <com.google.android.material.card.MaterialCardView
+        android:id="@+id/cardPrivateVault"
+        style="@style/Widget.Material3.CardView.Filled"
+        android:layout_width="match_parent"
+        android:layout_height="120dp"
+        android:layout_marginTop="16dp"
+        app:cardBackgroundColor="#1AFFFFFF"
+        app:cardCornerRadius="20dp"
+        app:strokeColor="#33FFFFFF"
+        app:strokeWidth="1dp"
+        app:layout_constraintTop_toBottomOf="@id/cardStartCamera">
+
+        <RelativeLayout
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:padding="20dp">
+
+            <TextView
+                android:id="@+id/lblVault"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="🔒 비공개 보관함 (Private Vault)"
+                android:textColor="@android:color/white"
+                android:textSize="18sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_below="@id/lblVault"
+                android:layout_marginTop="8dp"
+                android:text="일반 갤러리에 노출되지 않는 나만의 철통 보안 보관함"
+                android:textColor="#8AFFFFFF"
+                android:textSize="12sp" />
+
+            <ImageView
+                android:layout_width="32dp"
+                android:layout_height="32dp"
+                android:layout_alignParentEnd="true"
+                android:layout_centerVertical="true"
+                android:src="@android:drawable/ic_secure"
+                app:tint="@android:color/white" />
+        </RelativeLayout>
+    </com.google.android.material.card.MaterialCardView>
+
+    <!-- 설정 및 권한 관리 카드 -->
+    <com.google.android.material.card.MaterialCardView
+        android:id="@+id/cardSettings"
+        style="@style/Widget.Material3.CardView.Filled"
+        android:layout_width="match_parent"
+        android:layout_height="80dp"
+        android:layout_marginTop="16dp"
+        app:cardBackgroundColor="#1AFFFFFF"
+        app:cardCornerRadius="20dp"
+        app:strokeColor="#33FFFFFF"
+        app:strokeWidth="1dp"
+        app:layout_constraintTop_toBottomOf="@id/cardPrivateVault">
+
+        <RelativeLayout
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:paddingHorizontal="20dp"
+            android:paddingVertical="12dp">
+
+            <TextView
+                android:id="@+id/lblSettings"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="⚙️ 권한 및 설정 센터 (Settings)"
+                android:textColor="@android:color/white"
+                android:textSize="16sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_below="@id/lblSettings"
+                android:layout_marginTop="4dp"
+                android:text="필수 권한 동적 제어 및 배터리 최적화 통합 가이드"
+                android:textColor="#8AFFFFFF"
+                android:textSize="11sp" />
+
+            <ImageView
+                android:layout_width="24dp"
+                android:layout_height="24dp"
+                android:layout_alignParentEnd="true"
+                android:layout_centerVertical="true"
+                android:src="@android:drawable/ic_menu_preferences"
+                app:tint="@android:color/white" />
+        </RelativeLayout>
+    </com.google.android.material.card.MaterialCardView>
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="24dp"
+        android:text="v1.0.0 Stable Build"
+        android:textColor="#33FFFFFF"
+        android:textSize="10sp"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent" />
+
+</androidx.constraintlayout.widget.ConstraintLayout>
