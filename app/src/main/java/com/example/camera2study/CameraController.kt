@@ -84,7 +84,24 @@ class CameraController(private val context: Context) {
     var maxRepeatCount: Int = 1  // 기본 1회 (반복 없음)
     var currentRepeatCount: Int = 0
         private set
-    var isFileSizeOptimizationEnabled: Boolean = false
+
+    var targetFps: Int = 30
+        set(value) {
+            if (field != value) {
+                field = value
+                if (!isRecording() && cameraProvider != null) bindUseCases()
+            }
+        }
+
+    var isHdrEnabled: Boolean = false
+        set(value) {
+            if (field != value) {
+                field = value
+                if (!isRecording() && cameraProvider != null) bindUseCases()
+            }
+        }
+
+    var isLocationTagEnabled: Boolean = false
 
     // --- 추가 기능 변수 ---
     var currentRatioMode: Int = RATIO_3_4 // 3:4, 16:9, Full
@@ -175,8 +192,17 @@ class CameraController(private val context: Context) {
             else -> AspectRatio.RATIO_16_9
         }
 
-        // Preview 빌더
+        // Preview 빌더 — 가능하면 FPS 힌트를 capture request에 주입한다.
         val previewBuilder = Preview.Builder().setTargetAspectRatio(targetRatio)
+        try {
+            androidx.camera.camera2.interop.Camera2Interop.Extender(previewBuilder)
+                .setCaptureRequestOption(
+                    android.hardware.camera2.CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE,
+                    android.util.Range(targetFps, targetFps)
+                )
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
         val preview = previewBuilder.build()
         previewUseCase = preview
 
@@ -191,11 +217,21 @@ class CameraController(private val context: Context) {
         imageCapture = imageCaptureBuilder.build()
 
         // 3. VideoCapture
-        val recorderBuilder = Recorder.Builder()
+        val recorder = Recorder.Builder()
             .setQualitySelector(QualitySelector.from(videoQuality))
-        
-        val recorder = recorderBuilder.build()
-        val videoUseCase = VideoCapture.withOutput(recorder)
+            .build()
+        val videoUseCaseBuilder = VideoCapture.Builder(recorder)
+        if (isHdrEnabled) {
+            // HDR 10-bit 지원 단말에서만 적용된다. 미지원이면 CameraX가 fallback 처리한다.
+            try {
+                videoUseCaseBuilder.setDynamicRange(
+                    androidx.camera.core.DynamicRange.HDR_UNSPECIFIED_10_BIT
+                )
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+        val videoUseCase = videoUseCaseBuilder.build()
 
         val selector = buildSelector()
         try {

@@ -21,7 +21,9 @@ class SettingsBottomSheet : BottomSheetDialogFragment() {
         fun onQuality(quality: Quality)
         fun onMaxDuration(ms: Long)
         fun onMaxRepeatCount(count: Int)
-        fun onFileSizeOptimization(enabled: Boolean)
+        fun onFps(fps: Int)
+        fun onHdr(enabled: Boolean)
+        fun onLocationTag(enabled: Boolean)
     }
 
     private var _binding: BottomSheetSettingsBinding? = null
@@ -36,7 +38,9 @@ class SettingsBottomSheet : BottomSheetDialogFragment() {
     private var initialQuality: Quality = Quality.HD
     private var initialMaxDurationMs: Long = 0L
     private var initialMaxRepeatCount: Int = 1
-    private var initialFileSizeOpt: Boolean = false
+    private var initialFps: Int = 30
+    private var initialHdr: Boolean = false
+    private var initialLocationTag: Boolean = false
 
     private val awbOptions = listOf(
         "AUTO" to CameraMetadata.CONTROL_AWB_MODE_AUTO,
@@ -67,6 +71,11 @@ class SettingsBottomSheet : BottomSheetDialogFragment() {
         "3회" to 3,
         "5회" to 5,
         "무한 반복" to 999
+    )
+
+    private val fpsOptions = listOf(
+        "30 FPS" to 30,
+        "60 FPS" to 60
     )
 
     override fun onCreateView(
@@ -234,10 +243,32 @@ class SettingsBottomSheet : BottomSheetDialogFragment() {
             override fun onNothingSelected(p0: AdapterView<*>?) {}
         }
 
-        // 4. 파일 크기 최적화 스위치
-        binding.switchOptimization.isChecked = initialFileSizeOpt
-        binding.switchOptimization.setOnCheckedChangeListener { _, isChecked ->
-            callbacks?.onFileSizeOptimization(isChecked)
+        // 4. FPS 스피너
+        val fpsAdapter = ArrayAdapter(
+            requireContext(),
+            android.R.layout.simple_spinner_dropdown_item,
+            fpsOptions.map { it.first }
+        )
+        binding.spinnerFps.adapter = fpsAdapter
+        val fIdx = fpsOptions.indexOfFirst { it.second == initialFps }.coerceAtLeast(0)
+        binding.spinnerFps.setSelection(fIdx)
+        binding.spinnerFps.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                callbacks?.onFps(fpsOptions[position].second)
+            }
+            override fun onNothingSelected(p0: AdapterView<*>?) {}
+        }
+
+        // 5. HDR 스위치
+        binding.switchHdr.isChecked = initialHdr
+        binding.switchHdr.setOnCheckedChangeListener { _, isChecked ->
+            callbacks?.onHdr(isChecked)
+        }
+
+        // 6. 위치 태그 스위치 (기본 OFF)
+        binding.switchLocationTag.isChecked = initialLocationTag
+        binding.switchLocationTag.setOnCheckedChangeListener { _, isChecked ->
+            callbacks?.onLocationTag(isChecked)
         }
     }
 
@@ -280,7 +311,9 @@ class SettingsBottomSheet : BottomSheetDialogFragment() {
             currentQuality: Quality,
             currentMaxDurationMs: Long,
             currentMaxRepeatCount: Int,
-            currentFileSizeOpt: Boolean,
+            currentFps: Int,
+            currentHdr: Boolean,
+            currentLocationTag: Boolean,
             callbacks: Callbacks
         ): SettingsBottomSheet = SettingsBottomSheet().also {
             it.exposureRangeNs = exposureRangeNs
@@ -289,7 +322,9 @@ class SettingsBottomSheet : BottomSheetDialogFragment() {
             it.initialQuality = currentQuality
             it.initialMaxDurationMs = currentMaxDurationMs
             it.initialMaxRepeatCount = currentMaxRepeatCount
-            it.initialFileSizeOpt = currentFileSizeOpt
+            it.initialFps = currentFps
+            it.initialHdr = currentHdr
+            it.initialLocationTag = currentLocationTag
             it.callbacks = callbacks
         }
     }

@@ -138,6 +138,7 @@ class CameraFragment : Fragment() {
                 }
                 binding.btnSwitchFacing.startAnimation(scale)
                 controller.switchFacing()
+                saveCameraSettings()
             }
         }
 
@@ -484,13 +485,15 @@ class CameraFragment : Fragment() {
             currentQuality = controller.videoQuality,
             currentMaxDurationMs = controller.maxDurationMs,
             currentMaxRepeatCount = controller.maxRepeatCount,
-            currentFileSizeOpt = controller.isFileSizeOptimizationEnabled,
+            currentFps = controller.targetFps,
+            currentHdr = controller.isHdrEnabled,
+            currentLocationTag = controller.isLocationTagEnabled,
             callbacks = object : SettingsBottomSheet.Callbacks {
                 override fun onAwbMode(mode: Int) = controller.setAwbMode(mode)
                 override fun onWbGains(gains: FloatArray?) = controller.setManualWbGains(gains)
                 override fun onExposureTime(ns: Long?) = controller.setExposureTime(ns)
                 override fun onAperture(v: Float?) = controller.setAperture(v)
-                
+
                 override fun onQuality(quality: Quality) {
                     controller.videoQuality = quality
                 }
@@ -503,8 +506,19 @@ class CameraFragment : Fragment() {
                     controller.maxRepeatCount = count
                 }
 
-                override fun onFileSizeOptimization(enabled: Boolean) {
-                    controller.isFileSizeOptimizationEnabled = enabled
+                override fun onFps(fps: Int) {
+                    controller.targetFps = fps
+                    saveCameraSettings()
+                }
+
+                override fun onHdr(enabled: Boolean) {
+                    controller.isHdrEnabled = enabled
+                    saveCameraSettings()
+                }
+
+                override fun onLocationTag(enabled: Boolean) {
+                    controller.isLocationTagEnabled = enabled
+                    saveCameraSettings()
                 }
             }
         )
@@ -589,10 +603,14 @@ class CameraFragment : Fragment() {
         val sp = requireContext().getSharedPreferences("camera_pref", Context.MODE_PRIVATE)
         sp.edit().apply {
             putString("last_camera_id", controller.activeCameraId())
+            putBoolean("last_lens_facing_back", controller.isFacingBack())
             putFloat("last_zoom_ratio", controller.zoomRatio)
             putBoolean("last_audio_muted", controller.isAudioMuted)
             putBoolean("last_mute_sound", controller.isMuteSound)
             putInt("last_ratio_mode", controller.currentRatioMode)
+            putInt("last_fps", controller.targetFps)
+            putBoolean("last_hdr", controller.isHdrEnabled)
+            putBoolean("last_location_tag", controller.isLocationTagEnabled)
             apply()
         }
     }
@@ -601,11 +619,18 @@ class CameraFragment : Fragment() {
         if (!::controller.isInitialized) return
         val sp = requireContext().getSharedPreferences("camera_pref", Context.MODE_PRIVATE)
         val lastCameraId = sp.getString("last_camera_id", null)
+        val lastFacingBack = sp.getBoolean("last_lens_facing_back", true)
         val lastZoom = sp.getFloat("last_zoom_ratio", 1.0f)
         val lastAudioMuted = sp.getBoolean("last_audio_muted", false)
         val lastMuteSound = sp.getBoolean("last_mute_sound", false)
         val lastRatioMode = sp.getInt("last_ratio_mode", CameraController.RATIO_3_4)
+        val lastFps = sp.getInt("last_fps", 30)
+        val lastHdr = sp.getBoolean("last_hdr", false)
+        val lastLocationTag = sp.getBoolean("last_location_tag", false)
 
+        if (!lastFacingBack && controller.isFacingBack()) {
+            controller.switchFacing()
+        }
         lastCameraId?.let { id ->
             if (controller.isFacingBack()) {
                 controller.selectBackLens(id)
@@ -614,6 +639,9 @@ class CameraFragment : Fragment() {
         controller.setZoomRatio(lastZoom)
         controller.isAudioMuted = lastAudioMuted
         controller.isMuteSound = lastMuteSound
+        controller.targetFps = lastFps
+        controller.isHdrEnabled = lastHdr
+        controller.isLocationTagEnabled = lastLocationTag
         
         binding.btnMuteAudio.text = if (lastAudioMuted) "🔇 소리 끔" else "🎤 소리 켬"
         binding.btnMuteAudio.setTextColor(if (lastAudioMuted) Color.parseColor("#FF5252") else Color.WHITE)
