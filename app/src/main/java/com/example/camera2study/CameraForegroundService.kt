@@ -15,7 +15,9 @@ import android.os.Build
 import android.os.IBinder
 import android.os.Vibrator
 import androidx.core.app.NotificationCompat
+import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleService
+import androidx.lifecycle.ProcessLifecycleOwner
 
 /**
  * 카메라 백그라운드 녹화용 foreground service.
@@ -41,6 +43,15 @@ class CameraForegroundService : LifecycleService() {
         override fun onReceive(context: Context?, intent: Intent?) {
             if (intent?.action != "android.media.VOLUME_CHANGED_ACTION") return
             if (!controller.isRecording()) {
+                firstVolumeEventTime = 0L
+                lastVolumeEventTime = 0L
+                isLongPressTriggered = false
+                return
+            }
+
+            // 백그라운드 상황에서만 볼륨 길게 누르기로 종료. 앱이 foreground일 때는 앱 내부 버튼을 사용한다.
+            val processState = ProcessLifecycleOwner.get().lifecycle.currentState
+            if (processState.isAtLeast(Lifecycle.State.RESUMED)) {
                 firstVolumeEventTime = 0L
                 lastVolumeEventTime = 0L
                 isLongPressTriggered = false
