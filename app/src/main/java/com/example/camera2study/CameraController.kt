@@ -14,8 +14,9 @@ import androidx.camera.camera2.interop.Camera2CameraControl
 import androidx.camera.camera2.interop.Camera2CameraInfo
 import androidx.camera.camera2.interop.CaptureRequestOptions
 import androidx.camera.camera2.interop.ExperimentalCamera2Interop
-import androidx.camera.core.AspectRatio
 import androidx.camera.core.Camera
+import androidx.camera.core.resolutionselector.AspectRatioStrategy
+import androidx.camera.core.resolutionselector.ResolutionSelector
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.FocusMeteringAction
 import androidx.camera.core.ImageCapture
@@ -201,10 +202,13 @@ class CameraController(private val context: Context) {
 
         // 1. 화면 비율 결정 — 3:4는 4:3 sensor, 16:9 / Full은 16:9 sensor 출력으로 통일한다.
         // Full은 디스플레이 비율로 preview를 채우되 저장 결과는 16:9로 둬 Galaxy 기본 동작과 일치시킨다.
-        val targetRatio = when (currentRatioMode) {
-            RATIO_3_4 -> AspectRatio.RATIO_4_3
-            else -> AspectRatio.RATIO_16_9
+        val aspectRatioStrategy = when (currentRatioMode) {
+            RATIO_3_4 -> AspectRatioStrategy.RATIO_4_3_FALLBACK_AUTO_STRATEGY
+            else -> AspectRatioStrategy.RATIO_16_9_FALLBACK_AUTO_STRATEGY
         }
+        val resolutionSelector = ResolutionSelector.Builder()
+            .setAspectRatioStrategy(aspectRatioStrategy)
+            .build()
 
         // 현재 디스플레이 회전 정보. 액티비티가 portrait 고정이지만 명시적으로 use case에 주입한다.
         val displayRotation = previewView?.display?.rotation
@@ -212,7 +216,7 @@ class CameraController(private val context: Context) {
 
         // Preview 빌더 — 가능하면 FPS 힌트를 capture request에 주입한다.
         val previewBuilder = Preview.Builder()
-            .setTargetAspectRatio(targetRatio)
+            .setResolutionSelector(resolutionSelector)
             .setTargetRotation(displayRotation)
         try {
             androidx.camera.camera2.interop.Camera2Interop.Extender(previewBuilder)
@@ -232,7 +236,7 @@ class CameraController(private val context: Context) {
 
         // 2. ImageCapture (사진 촬영)
         val imageCaptureBuilder = ImageCapture.Builder()
-            .setTargetAspectRatio(targetRatio)
+            .setResolutionSelector(resolutionSelector)
             .setTargetRotation(displayRotation)
             .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
         imageCapture = imageCaptureBuilder.build()
