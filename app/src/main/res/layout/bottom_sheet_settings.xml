@@ -200,13 +200,6 @@
             android:text="HDR 10-bit (지원 단말 한정)"
             android:textStyle="bold" />
 
-        <com.google.android.material.switchmaterial.SwitchMaterial
-            android:id="@+id/switchLocationTag"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="12dp"
-            android:text="위치 태그 (기본 OFF)"
-            android:textStyle="bold" />
 
     </LinearLayout>
 </ScrollView>

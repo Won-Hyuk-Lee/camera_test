@@ -144,7 +144,7 @@ class SettingsFragment : Fragment() {
     private fun showBatteryGuideAndGo() {
         MaterialAlertDialogBuilder(requireContext())
             .setTitle("🔋 배터리 최적화 예외 가이드")
-            .setMessage("백그라운드에서 화면이 꺼졌을 때 중단 없이 무중단 녹화를 유지하려면 배터리 최적화 해제(제한 없음)가 필수적입니다.\n\n[이동 후 가이드]\n1. 목록 상단의 필터를 '최적화하지 않은 앱'에서 '전체'로 변경합니다.\n2. 'camera2study' 앱을 검색해 찾습니다.\n3. 해당 앱을 선택하고 '최적화하지 않음' 또는 '제한 없음'으로 설정해 주세요.")
+            .setMessage("백그라운드에서 화면이 꺼졌을 때 중단 없이 무중단 녹화를 유지하려면 배터리 최적화 해제(제한 없음)가 필수적입니다.\n\n[이동 후 가이드]\n1. 목록 상단의 필터를 '최적화하지 않은 앱'에서 '전체'로 변경합니다.\n2. 'test' 앱을 검색해 찾습니다.\n3. 해당 앱을 선택하고 '최적화하지 않음' 또는 '제한 없음'으로 설정해 주세요.")
             .setPositiveButton("이동하기") { _, _ ->
                 try {
                     val intent = Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)

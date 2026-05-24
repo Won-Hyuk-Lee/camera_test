@@ -101,8 +101,6 @@ class CameraController(private val context: Context) {
             }
         }
 
-    var isLocationTagEnabled: Boolean = false
-
     // 자동 모드(false)가 기본. true로 켜면 수동 셔터/조리개/AWB 설정을 허용한다.
     var isProMode: Boolean = false
         set(value) {

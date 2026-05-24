@@ -23,7 +23,6 @@ class SettingsBottomSheet : BottomSheetDialogFragment() {
         fun onMaxRepeatCount(count: Int)
         fun onFps(fps: Int)
         fun onHdr(enabled: Boolean)
-        fun onLocationTag(enabled: Boolean)
         fun onProMode(enabled: Boolean)
     }
 
@@ -41,7 +40,6 @@ class SettingsBottomSheet : BottomSheetDialogFragment() {
     private var initialMaxRepeatCount: Int = 1
     private var initialFps: Int = 30
     private var initialHdr: Boolean = false
-    private var initialLocationTag: Boolean = false
     private var initialProMode: Boolean = false
 
     private val awbOptions = listOf(
@@ -288,11 +286,6 @@ class SettingsBottomSheet : BottomSheetDialogFragment() {
             callbacks?.onHdr(isChecked)
         }
 
-        // 6. 위치 태그 스위치 (기본 OFF)
-        binding.switchLocationTag.isChecked = initialLocationTag
-        binding.switchLocationTag.setOnCheckedChangeListener { _, isChecked ->
-            callbacks?.onLocationTag(isChecked)
-        }
     }
 
     private fun formatShutter(ns: Long): String {
@@ -336,7 +329,6 @@ class SettingsBottomSheet : BottomSheetDialogFragment() {
             currentMaxRepeatCount: Int,
             currentFps: Int,
             currentHdr: Boolean,
-            currentLocationTag: Boolean,
             currentProMode: Boolean,
             callbacks: Callbacks
         ): SettingsBottomSheet = SettingsBottomSheet().also {
@@ -348,7 +340,6 @@ class SettingsBottomSheet : BottomSheetDialogFragment() {
             it.initialMaxRepeatCount = currentMaxRepeatCount
             it.initialFps = currentFps
             it.initialHdr = currentHdr
-            it.initialLocationTag = currentLocationTag
             it.initialProMode = currentProMode
             it.callbacks = callbacks
         }

@@ -487,7 +487,6 @@ class CameraFragment : Fragment() {
             currentMaxRepeatCount = controller.maxRepeatCount,
             currentFps = controller.targetFps,
             currentHdr = controller.isHdrEnabled,
-            currentLocationTag = controller.isLocationTagEnabled,
             currentProMode = controller.isProMode,
             callbacks = object : SettingsBottomSheet.Callbacks {
                 override fun onAwbMode(mode: Int) = controller.setAwbMode(mode)
@@ -514,11 +513,6 @@ class CameraFragment : Fragment() {
 
                 override fun onHdr(enabled: Boolean) {
                     controller.isHdrEnabled = enabled
-                    saveCameraSettings()
-                }
-
-                override fun onLocationTag(enabled: Boolean) {
-                    controller.isLocationTagEnabled = enabled
                     saveCameraSettings()
                 }
 
@@ -616,7 +610,6 @@ class CameraFragment : Fragment() {
             putInt("last_ratio_mode", controller.currentRatioMode)
             putInt("last_fps", controller.targetFps)
             putBoolean("last_hdr", controller.isHdrEnabled)
-            putBoolean("last_location_tag", controller.isLocationTagEnabled)
             putBoolean("last_pro_mode", controller.isProMode)
             apply()
         }
@@ -633,7 +626,6 @@ class CameraFragment : Fragment() {
         val lastRatioMode = sp.getInt("last_ratio_mode", CameraController.RATIO_3_4)
         val lastFps = sp.getInt("last_fps", 30)
         val lastHdr = sp.getBoolean("last_hdr", false)
-        val lastLocationTag = sp.getBoolean("last_location_tag", false)
         val lastProMode = sp.getBoolean("last_pro_mode", false)
 
         if (!lastFacingBack && controller.isFacingBack()) {
@@ -649,7 +641,6 @@ class CameraFragment : Fragment() {
         controller.isMuteSound = lastMuteSound
         controller.targetFps = lastFps
         controller.isHdrEnabled = lastHdr
-        controller.isLocationTagEnabled = lastLocationTag
         controller.isProMode = lastProMode
         
         binding.btnMuteAudio.text = if (lastAudioMuted) "🔇 소리 끔" else "🎤 소리 켬"

@@ -106,7 +106,7 @@
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:layout_marginTop="12dp"
-                        android:text="[ 배터리 최적화 해제 가이드 ]\n1. 아래 '설정 화면 이동' 버튼 클릭\n2. 상단 필터를 '최적화하지 않은 앱'에서 '전체'로 변경\n3. 목록에서 'camera2study' 앱 검색\n4. 선택 후 '최적화하지 않음' 또는 '제한 없음'으로 지정"
+                        android:text="[ 배터리 최적화 해제 가이드 ]\n1. 아래 '설정 화면 이동' 버튼 클릭\n2. 상단 필터를 '최적화하지 않은 앱'에서 '전체'로 변경\n3. 목록에서 'test' 앱 검색\n4. 선택 후 '최적화하지 않음' 또는 '제한 없음'으로 지정"
                         android:textColor="#B3FFFFFF"
                         android:textSize="11sp"
                         android:lineSpacingExtra="4dp" />
