@@ -43,6 +43,7 @@ class CameraFragment : Fragment() {
     private var isPhotoMode: Boolean = true // 기본 사진 모드
 
     private var recordStartMs: Long = 0L
+    private var pauseStartMs: Long = 0L
     private val timerRunnable = object : Runnable {
         override fun run() {
             if (!::controller.isInitialized) return
@@ -150,6 +151,16 @@ class CameraFragment : Fragment() {
 
         binding.btnRecord.setOnClickListener {
             handleShutterClick()
+        }
+
+        binding.btnPauseResume.setOnClickListener {
+            if (::controller.isInitialized) {
+                if (controller.isPaused()) {
+                    controller.resumeRecording()
+                } else {
+                    controller.pauseRecording()
+                }
+            }
         }
 
         // 모드 탭 리스너
@@ -529,8 +540,9 @@ class CameraFragment : Fragment() {
         if (isRecording) {
             recordStartMs = SystemClock.elapsedRealtime()
             binding.txtTimer.post(timerRunnable)
-            
-            // 녹화 작동 셔터 변형 애니메이션 (둥근 빨간 채우기가 살짝 사각형처럼 축소)
+            binding.btnPauseResume.visibility = View.VISIBLE
+            binding.btnPauseResume.text = "⏸ 일시정지"
+
             val animation = ScaleAnimation(
                 1.0f, 0.6f, 1.0f, 0.6f,
                 ScaleAnimation.RELATIVE_TO_SELF, 0.5f,
@@ -543,9 +555,9 @@ class CameraFragment : Fragment() {
         } else {
             binding.txtTimer.removeCallbacks(timerRunnable)
             binding.txtTimer.text = "00:00"
+            binding.btnPauseResume.visibility = View.GONE
             binding.shutterCenter.clearAnimation()
-            
-            // 원래 둥근 원 복원
+
             val animation = ScaleAnimation(
                 0.6f, 1.0f, 0.6f, 1.0f,
                 ScaleAnimation.RELATIVE_TO_SELF, 0.5f,
@@ -562,6 +574,18 @@ class CameraFragment : Fragment() {
         when (event) {
             is VideoRecordEvent.Start -> {
                 syncRecordingUi(true)
+            }
+            is VideoRecordEvent.Pause -> {
+                pauseStartMs = SystemClock.elapsedRealtime()
+                binding.txtTimer.removeCallbacks(timerRunnable)
+                binding.btnPauseResume.text = "▶ 재개"
+            }
+            is VideoRecordEvent.Resume -> {
+                // pause 구간만큼 recordStartMs를 앞으로 당겨 타이머에 포함시키지 않는다.
+                val pausedDuration = SystemClock.elapsedRealtime() - pauseStartMs
+                recordStartMs += pausedDuration
+                binding.txtTimer.post(timerRunnable)
+                binding.btnPauseResume.text = "⏸ 일시정지"
             }
             is VideoRecordEvent.Finalize -> {
                 if (!controller.isRecording()) {

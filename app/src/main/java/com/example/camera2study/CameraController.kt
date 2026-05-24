@@ -143,6 +143,12 @@ class CameraController(private val context: Context) {
     }
     private var isAutoStopping = false // 최대 시간에 의해 중지되었는지 여부
 
+    // pause/resume 상태 — 녹화 시간에서 pause 구간을 제외하기 위해 사용한다.
+    private var isRecordingPaused = false
+    private var recordingStartElapsedMs = 0L  // Start 이벤트 수신 시각
+    private var pauseStartElapsedMs = 0L       // 현재 pause 시작 시각
+    private var totalPausedMs = 0L             // 누적 pause 시간
+
     var onRecordingEvent: ((VideoRecordEvent) -> Unit)? = null
     var onCameraChanged: ((String?) -> Unit)? = null
     var onZoomChanged: ((Float, Float) -> Unit)? = null // current, max
@@ -555,6 +561,8 @@ class CameraController(private val context: Context) {
         }
 
         isAutoStopping = false
+        isRecordingPaused = false
+        totalPausedMs = 0L
 
         if (!isAudioMuted) {
             prep.withAudioEnabled()
@@ -562,18 +570,44 @@ class CameraController(private val context: Context) {
 
         recording = prep.start(ContextCompat.getMainExecutor(context)) { event: VideoRecordEvent ->
             onRecordingEvent?.invoke(event)
-            
+
             if (event is VideoRecordEvent.Start) {
+                recordingStartElapsedMs = android.os.SystemClock.elapsedRealtime()
                 if (maxDurationMs > 0) {
                     mainHandler.removeCallbacks(autoStopRunnable)
                     mainHandler.postDelayed(autoStopRunnable, maxDurationMs)
                 }
             }
-            
+
+            if (event is VideoRecordEvent.Pause) {
+                isRecordingPaused = true
+                pauseStartElapsedMs = android.os.SystemClock.elapsedRealtime()
+                // pause 동안 auto-stop 타이머를 멈춘다.
+                mainHandler.removeCallbacks(autoStopRunnable)
+            }
+
+            if (event is VideoRecordEvent.Resume) {
+                isRecordingPaused = false
+                val pausedSegment = android.os.SystemClock.elapsedRealtime() - pauseStartElapsedMs
+                totalPausedMs += pausedSegment
+                // 잔여 시간 기준으로 auto-stop 재예약한다.
+                if (maxDurationMs > 0) {
+                    val elapsed = android.os.SystemClock.elapsedRealtime() - recordingStartElapsedMs - totalPausedMs
+                    val remaining = maxDurationMs - elapsed
+                    if (remaining > 0) {
+                        mainHandler.postDelayed(autoStopRunnable, remaining)
+                    } else {
+                        isAutoStopping = true
+                        stopRecording()
+                    }
+                }
+            }
+
             if (event is VideoRecordEvent.Finalize) {
                 restoreSystemSound()
                 mainHandler.removeCallbacks(autoStopRunnable)
                 recording = null
+                isRecordingPaused = false
 
                 // 연쇄 반복 녹화가 끝났을 때만 WakeLock을 완전 해제
                 val wasAutoStop = isAutoStopping
@@ -614,6 +648,20 @@ class CameraController(private val context: Context) {
             wakeLock?.release()
         }
     }
+
+    fun pauseRecording() {
+        if (isRecording() && !isRecordingPaused) {
+            recording?.pause()
+        }
+    }
+
+    fun resumeRecording() {
+        if (isRecording() && isRecordingPaused) {
+            recording?.resume()
+        }
+    }
+
+    fun isPaused(): Boolean = isRecordingPaused
 
     fun stopRecording() {
         // recording = null과 wake lock 해제는 Recording.Finalize callback에서 처리한다.

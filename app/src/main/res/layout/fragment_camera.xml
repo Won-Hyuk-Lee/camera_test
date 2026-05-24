@@ -323,6 +323,20 @@
             android:focusable="true" />
     </LinearLayout>
 
+    <!-- Pause/Resume 버튼 — 녹화 중일 때만 표시 -->
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/btnPauseResume"
+        style="@style/Widget.Material3.Button.TonalButton"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="8dp"
+        android:text="⏸ 일시정지"
+        android:textSize="12sp"
+        android:visibility="gone"
+        app:layout_constraintBottom_toTopOf="@id/bottomBar"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent" />
+
     <!-- 7. 하단 바 제어 패널 (갤러리 보관함 ↔ 셔터 ↔ 전후 전환) -->
     <LinearLayout
         android:id="@+id/bottomBar"
