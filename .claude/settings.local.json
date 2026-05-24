@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(find \"/c/Program Files\" -name \"sdkmanager.bat\" 2>/dev/null | head -5 *)",
+      "Read(//c/Program Files/**)",
+      "Read(//c/Users/Lee/**)"
+    ]
+  }
+}
