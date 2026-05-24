@@ -5,7 +5,7 @@ plugins {
 
 android {
     namespace = "com.example.camera2study"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "com.example.camera2study"
@@ -43,7 +43,7 @@ android {
 }
 
 dependencies {
-    val cameraxVersion = "1.3.4"
+    val cameraxVersion = "1.4.2"
 
     implementation("androidx.core:core-ktx:1.13.1")
     implementation("androidx.appcompat:appcompat:1.7.0")
