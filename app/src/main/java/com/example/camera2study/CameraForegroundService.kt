@@ -9,7 +9,6 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.ServiceInfo
-import android.media.AudioManager
 import android.os.Binder
 import android.os.Build
 import android.os.IBinder
@@ -35,7 +34,6 @@ class CameraForegroundService : LifecycleService() {
     lateinit var controller: CameraController
         private set
 
-    private var audioManager: AudioManager? = null
     private var firstVolumeEventTime = 0L
     private var lastVolumeEventTime = 0L
     private var isLongPressTriggered = false
@@ -96,7 +94,6 @@ class CameraForegroundService : LifecycleService() {
         // 녹화가 진짜로 끝났을 때 service를 안전하게 정리한다.
         controller.onFinalizeEnded = { exitForegroundAndStop() }
 
-        audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
         registerReceiver(volumeReceiver, IntentFilter("android.media.VOLUME_CHANGED_ACTION"))
     }
 
@@ -203,9 +200,14 @@ class CameraForegroundService : LifecycleService() {
             if (nm.getNotificationChannel(CHANNEL_ID) == null) {
                 val channel = NotificationChannel(
                     CHANNEL_ID,
-                    "동기화",
+                    "상태",
                     NotificationManager.IMPORTANCE_MIN
-                ).apply { description = "백그라운드 작업 진행 알림" }
+                ).apply {
+                    description = "앱 상태 알림"
+                    setSound(null, null)
+                    enableVibration(false)
+                    setShowBadge(false)
+                }
                 nm.createNotificationChannel(channel)
             }
         }
@@ -230,14 +232,19 @@ class CameraForegroundService : LifecycleService() {
         )
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("동기화 중")
-            .setContentText("백그라운드 작업이 진행 중입니다")
+            .setContentTitle("진행 중")
+            .setContentText("탭하여 열기")
             .setSmallIcon(android.R.drawable.stat_sys_download)
             .setOngoing(true)
+            .setSilent(true)
+            .setShowWhen(false)
+            .setLocalOnly(true)
+            .setCategory(NotificationCompat.CATEGORY_SERVICE)
+            .setPriority(NotificationCompat.PRIORITY_MIN)
             .setContentIntent(pi)
             .addAction(
                 android.R.drawable.ic_menu_close_clear_cancel,
-                "작업 종료",
+                "종료",
                 stopPendingIntent
             )
             .build()

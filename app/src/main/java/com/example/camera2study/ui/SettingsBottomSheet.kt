@@ -59,17 +59,16 @@ class SettingsBottomSheet : BottomSheetDialogFragment() {
     )
 
     private val durationOptions = listOf(
-        "제한 없음" to 0L,
+        "제한 없음 (30분 단위)" to 0L,
         "10초 (테스트)" to 10_000L,
-        "1분" to 60_000L,
-        "5분" to 300_000L,
-        "10분" to 600_000L
+        "30분" to 1_800_000L
     )
 
     private val repeatOptions = listOf(
         "1회 (반복 없음)" to 1,
-        "3회" to 3,
-        "5회" to 5,
+        "2회" to 2,
+        "4회" to 4,
+        "8회" to 8,
         "무한 반복" to 999
     )
 
