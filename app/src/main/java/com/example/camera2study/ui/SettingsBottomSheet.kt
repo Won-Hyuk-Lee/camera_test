@@ -8,6 +8,7 @@ import android.view.ViewGroup
 import android.widget.AdapterView
 import android.widget.ArrayAdapter
 import com.example.camera2study.databinding.BottomSheetSettingsBinding
+import com.example.camera2study.util.CameraSettingsStore
 import com.google.android.material.bottomsheet.BottomSheetDialogFragment
 import androidx.camera.video.Quality
 
@@ -15,6 +16,7 @@ class SettingsBottomSheet : BottomSheetDialogFragment() {
 
     interface Callbacks {
         fun onAwbMode(mode: Int)
+        fun onColorTemperature(kelvin: Int)
         fun onWbGains(gains: FloatArray?)
         fun onExposureTime(ns: Long?)
         fun onAperture(v: Float?)
@@ -41,6 +43,10 @@ class SettingsBottomSheet : BottomSheetDialogFragment() {
     private var initialFps: Int = 30
     private var initialHdr: Boolean = false
     private var initialProMode: Boolean = false
+    private var initialAwbMode: Int = CameraMetadata.CONTROL_AWB_MODE_AUTO
+    private var initialColorTempK: Int = CameraSettingsStore.DEFAULT_COLOR_TEMP_K
+    private var initialExposureTimeNs: Long? = null
+    private var initialAperture: Float? = null
 
     private val awbOptions = listOf(
         "AUTO" to CameraMetadata.CONTROL_AWB_MODE_AUTO,
@@ -89,8 +95,8 @@ class SettingsBottomSheet : BottomSheetDialogFragment() {
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
         setupProModeSwitch()
-        setupAwbSpinner()
         setupColorTempSlider()
+        setupAwbSpinner()
         setupExposureSlider()
         setupApertureSlider()
 
@@ -107,11 +113,12 @@ class SettingsBottomSheet : BottomSheetDialogFragment() {
             if (!isChecked) {
                 // 자동 모드로 복귀할 때 누적된 수동 파라미터를 초기화한다.
                 callbacks?.onAwbMode(CameraMetadata.CONTROL_AWB_MODE_AUTO)
+                callbacks?.onColorTemperature(CameraSettingsStore.DEFAULT_COLOR_TEMP_K)
                 callbacks?.onWbGains(null)
                 callbacks?.onExposureTime(null)
                 callbacks?.onAperture(null)
                 binding.spinnerAwb.setSelection(0)
-                binding.sliderColorTemp.value = 5500f
+                binding.sliderColorTemp.value = CameraSettingsStore.DEFAULT_COLOR_TEMP_K.toFloat()
                 binding.sliderExposure.value = 0f
                 binding.txtExposureValue.text = "AUTO"
             }
@@ -134,36 +141,48 @@ class SettingsBottomSheet : BottomSheetDialogFragment() {
             awbOptions.map { it.first }
         )
         binding.spinnerAwb.adapter = adapter
+        val selected = awbOptions.indexOfFirst { it.second == initialAwbMode }.coerceAtLeast(0)
+        binding.spinnerAwb.setSelection(selected)
+        updateAwbDependentUi(awbOptions[selected].second == CameraMetadata.CONTROL_AWB_MODE_OFF)
         binding.spinnerAwb.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
             override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
                 val mode = awbOptions[position].second
                 callbacks?.onAwbMode(mode)
                 val manual = mode == CameraMetadata.CONTROL_AWB_MODE_OFF
-                binding.sliderColorTemp.isEnabled = manual
-                binding.txtColorTempLabel.alpha = if (manual) 1f else 0.4f
+                updateAwbDependentUi(manual)
                 if (!manual) callbacks?.onWbGains(null)
-                else callbacks?.onWbGains(kelvinToGains(binding.sliderColorTemp.value.toInt()))
+                else {
+                    val kelvin = binding.sliderColorTemp.value.toInt()
+                    callbacks?.onColorTemperature(kelvin)
+                    callbacks?.onWbGains(CameraSettingsStore.kelvinToGains(kelvin))
+                }
             }
 
             override fun onNothingSelected(parent: AdapterView<*>?) {}
         }
     }
 
+    private fun updateAwbDependentUi(manual: Boolean) {
+        binding.sliderColorTemp.isEnabled = manual
+        binding.txtColorTempLabel.alpha = if (manual) 1f else 0.4f
+    }
+
     private fun setupColorTempSlider() {
         binding.sliderColorTemp.valueFrom = 3000f
         binding.sliderColorTemp.valueTo = 8000f
         binding.sliderColorTemp.stepSize = 100f
-        binding.sliderColorTemp.value = 5500f
-        binding.sliderColorTemp.isEnabled = false
-        binding.txtColorTempLabel.alpha = 0.4f
+        binding.sliderColorTemp.value = initialColorTempK.coerceIn(3000, 8000).toFloat()
+        updateAwbDependentUi(initialAwbMode == CameraMetadata.CONTROL_AWB_MODE_OFF)
 
         binding.sliderColorTemp.addOnChangeListener { _, value, _ ->
-            binding.txtColorTempValue.text = "${value.toInt()}K"
+            val kelvin = value.toInt()
+            binding.txtColorTempValue.text = "${kelvin}K"
             if (binding.sliderColorTemp.isEnabled) {
-                callbacks?.onWbGains(kelvinToGains(value.toInt()))
+                callbacks?.onColorTemperature(kelvin)
+                callbacks?.onWbGains(CameraSettingsStore.kelvinToGains(kelvin))
             }
         }
-        binding.txtColorTempValue.text = "5500K"
+        binding.txtColorTempValue.text = "${binding.sliderColorTemp.value.toInt()}K"
     }
 
     private fun setupExposureSlider() {
@@ -175,8 +194,12 @@ class SettingsBottomSheet : BottomSheetDialogFragment() {
         }
         binding.sliderExposure.valueFrom = 0f
         binding.sliderExposure.valueTo = 100f
-        binding.sliderExposure.value = 0f
-        binding.txtExposureValue.text = "AUTO"
+        val initialValue = initialExposureTimeNs?.let { ns ->
+            val span = range.last - range.first
+            if (span <= 0L) 0f else (((ns - range.first).toDouble() / span) * 100.0).toFloat()
+        }?.coerceIn(0f, 100f) ?: 0f
+        binding.sliderExposure.value = initialValue
+        binding.txtExposureValue.text = initialExposureTimeNs?.let { formatShutter(it) } ?: "AUTO"
 
         binding.sliderExposure.addOnChangeListener { _, value, _ ->
             if (value <= 0.5f) {
@@ -203,8 +226,11 @@ class SettingsBottomSheet : BottomSheetDialogFragment() {
         binding.sliderAperture.valueFrom = 0f
         binding.sliderAperture.valueTo = (list.size - 1).toFloat()
         binding.sliderAperture.stepSize = 1f
-        binding.sliderAperture.value = 0f
-        binding.txtApertureValue.text = "F${"%.1f".format(list[0])}"
+        val selectedIndex = initialAperture?.let { current ->
+            list.indices.minByOrNull { idx -> kotlin.math.abs(list[idx] - current) }
+        } ?: 0
+        binding.sliderAperture.value = selectedIndex.toFloat()
+        binding.txtApertureValue.text = "F${"%.1f".format(list[selectedIndex])}"
 
         binding.sliderAperture.addOnChangeListener { _, value, _ ->
             val idx = value.toInt().coerceIn(0, list.size - 1)
@@ -329,6 +355,10 @@ class SettingsBottomSheet : BottomSheetDialogFragment() {
             currentFps: Int,
             currentHdr: Boolean,
             currentProMode: Boolean,
+            currentAwbMode: Int,
+            currentColorTempK: Int,
+            currentExposureTimeNs: Long?,
+            currentAperture: Float?,
             callbacks: Callbacks
         ): SettingsBottomSheet = SettingsBottomSheet().also {
             it.exposureRangeNs = exposureRangeNs
@@ -340,6 +370,10 @@ class SettingsBottomSheet : BottomSheetDialogFragment() {
             it.initialFps = currentFps
             it.initialHdr = currentHdr
             it.initialProMode = currentProMode
+            it.initialAwbMode = currentAwbMode
+            it.initialColorTempK = currentColorTempK
+            it.initialExposureTimeNs = currentExposureTimeNs
+            it.initialAperture = currentAperture
             it.callbacks = callbacks
         }
     }

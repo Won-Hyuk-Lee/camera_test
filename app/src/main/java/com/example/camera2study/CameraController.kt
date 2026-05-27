@@ -481,20 +481,28 @@ class CameraController(private val context: Context) {
         applyOptionsLive()
     }
 
+    fun getAwbMode(): Int = awbMode
+
     fun setManualWbGains(gains: FloatArray?) {
         manualWbGains = gains
         applyOptionsLive()
     }
+
+    fun getManualWbGains(): FloatArray? = manualWbGains?.copyOf()
 
     fun setExposureTime(ns: Long?) {
         exposureTimeNs = ns
         applyOptionsLive()
     }
 
+    fun getExposureTime(): Long? = exposureTimeNs
+
     fun setAperture(value: Float?) {
         aperture = value
         applyOptionsLive()
     }
+
+    fun getAperture(): Float? = aperture
 
     // --- 노출 보정 (AE) 제어 API ---
     fun getMinExposureIndex(): Int =

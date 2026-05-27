@@ -28,6 +28,7 @@ import com.example.camera2study.CameraForegroundService
 import com.example.camera2study.R
 import com.example.camera2study.databinding.FragmentCameraBinding
 import com.example.camera2study.util.CameraUtils
+import com.example.camera2study.util.CameraSettingsStore
 import com.google.android.material.button.MaterialButton
 import java.io.File
 
@@ -39,6 +40,7 @@ class CameraFragment : Fragment() {
     private var service: CameraForegroundService? = null
     private lateinit var controller: CameraController
     private var isBound = false
+    private var manualColorTempK: Int = CameraSettingsStore.DEFAULT_COLOR_TEMP_K
 
     private var isPhotoMode: Boolean = true // 기본 사진 모드
 
@@ -480,22 +482,49 @@ class CameraFragment : Fragment() {
             currentFps = controller.targetFps,
             currentHdr = controller.isHdrEnabled,
             currentProMode = controller.isProMode,
+            currentAwbMode = controller.getAwbMode(),
+            currentColorTempK = manualColorTempK,
+            currentExposureTimeNs = controller.getExposureTime(),
+            currentAperture = controller.getAperture(),
             callbacks = object : SettingsBottomSheet.Callbacks {
-                override fun onAwbMode(mode: Int) = controller.setAwbMode(mode)
-                override fun onWbGains(gains: FloatArray?) = controller.setManualWbGains(gains)
-                override fun onExposureTime(ns: Long?) = controller.setExposureTime(ns)
-                override fun onAperture(v: Float?) = controller.setAperture(v)
+                override fun onAwbMode(mode: Int) {
+                    controller.setAwbMode(mode)
+                    saveCameraSettings()
+                }
+
+                override fun onColorTemperature(kelvin: Int) {
+                    manualColorTempK = kelvin
+                    saveCameraSettings()
+                }
+
+                override fun onWbGains(gains: FloatArray?) {
+                    controller.setManualWbGains(gains)
+                    saveCameraSettings()
+                }
+
+                override fun onExposureTime(ns: Long?) {
+                    controller.setExposureTime(ns)
+                    saveCameraSettings()
+                }
+
+                override fun onAperture(v: Float?) {
+                    controller.setAperture(v)
+                    saveCameraSettings()
+                }
 
                 override fun onQuality(quality: Quality) {
                     controller.videoQuality = quality
+                    saveCameraSettings()
                 }
 
                 override fun onMaxDuration(ms: Long) {
                     controller.maxDurationMs = ms
+                    saveCameraSettings()
                 }
 
                 override fun onMaxRepeatCount(count: Int) {
                     controller.maxRepeatCount = count
+                    saveCameraSettings()
                 }
 
                 override fun onFps(fps: Int) {
@@ -605,44 +634,20 @@ class CameraFragment : Fragment() {
 
     private fun saveCameraSettings() {
         if (!::controller.isInitialized) return
-        val sp = requireContext().getSharedPreferences("camera_pref", Context.MODE_PRIVATE)
-        sp.edit().apply {
-            putString("last_camera_id", controller.activeCameraId())
-            putBoolean("last_lens_facing_back", controller.isFacingBack())
-            putFloat("last_zoom_ratio", controller.zoomRatio)
-            putFloat("last_zoom_mode", controller.selectedZoomModeRatio)
-            putInt("last_ratio_mode", controller.currentRatioMode)
-            putInt("last_fps", controller.targetFps)
-            putBoolean("last_hdr", controller.isHdrEnabled)
-            putBoolean("last_pro_mode", controller.isProMode)
-            apply()
-        }
+        val settings = CameraSettingsStore.snapshot(
+            requireContext(),
+            controller,
+            manualColorTempK
+        )
+        CameraSettingsStore.save(requireContext(), settings)
     }
 
     private fun restoreCameraSettings() {
         if (!::controller.isInitialized) return
-        val sp = requireContext().getSharedPreferences("camera_pref", Context.MODE_PRIVATE)
-        val lastFacingBack = sp.getBoolean("last_lens_facing_back", true)
-        val lastZoom = sp.getFloat("last_zoom_ratio", 1.0f)
-        val lastZoomMode = sp.getFloat("last_zoom_mode", 1.0f)
-        val lastRatioMode = sp.getInt("last_ratio_mode", CameraController.RATIO_3_4)
-        val lastFps = sp.getInt("last_fps", 30)
-        val lastHdr = sp.getBoolean("last_hdr", false)
-        val lastProMode = sp.getBoolean("last_pro_mode", false)
-
-        if (!lastFacingBack && controller.isFacingBack()) {
-            controller.switchFacing()
-        }
-        if (controller.isFacingBack()) {
-            controller.selectBackZoomMode(lastZoomMode)
-        } else {
-            controller.setZoomRatio(lastZoom)
-        }
-        controller.targetFps = lastFps
-        controller.isHdrEnabled = lastHdr
-        controller.isProMode = lastProMode
-
-        updateRatioSelection(lastRatioMode)
+        val settings = CameraSettingsStore.load(requireContext())
+        manualColorTempK = settings.colorTempK
+        CameraSettingsStore.applyToController(controller, settings)
+        updateRatioSelection(settings.ratioMode)
     }
 
     override fun onDestroyView() {
