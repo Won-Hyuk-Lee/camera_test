@@ -18,6 +18,7 @@ import androidx.core.app.NotificationCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleService
 import androidx.lifecycle.ProcessLifecycleOwner
+import com.example.camera2study.util.CameraSettingsStore
 
 /**
  * 카메라 백그라운드 녹화용 foreground service.
@@ -37,6 +38,8 @@ class CameraForegroundService : LifecycleService() {
     private var firstVolumeEventTime = 0L
     private var lastVolumeEventTime = 0L
     private var isLongPressTriggered = false
+    private var isControllerReady = false
+    private var pendingWidgetStart = false
 
     private val volumeReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -89,7 +92,10 @@ class CameraForegroundService : LifecycleService() {
         super.onCreate()
 
         controller = CameraController(applicationContext)
-        controller.init(this)
+        controller.init(this) {
+            isControllerReady = true
+            startPendingWidgetRecording()
+        }
 
         // 녹화가 진짜로 끝났을 때 service를 안전하게 정리한다.
         controller.onFinalizeEnded = { exitForegroundAndStop() }
@@ -107,6 +113,13 @@ class CameraForegroundService : LifecycleService() {
 
         when (intent?.action) {
             ACTION_START_RECORDING -> enterRecordingForeground()
+            ACTION_TOGGLE_RECORDING -> {
+                if (controller.isRecording()) {
+                    stopBackgroundRecording()
+                } else {
+                    requestWidgetRecordingStart()
+                }
+            }
             ACTION_STOP_RECORDING -> {
                 if (controller.isRecording()) {
                     stopBackgroundRecording()
@@ -143,6 +156,24 @@ class CameraForegroundService : LifecycleService() {
         firstVolumeEventTime = 0L
         lastVolumeEventTime = 0L
         controller.startRecording()
+    }
+
+    private fun requestWidgetRecordingStart() {
+        enterRecordingForeground()
+        pendingWidgetStart = true
+        startPendingWidgetRecording()
+    }
+
+    private fun startPendingWidgetRecording() {
+        if (!pendingWidgetStart || !isControllerReady) return
+        pendingWidgetStart = false
+        if (controller.isRecording()) return
+
+        val settings = CameraSettingsStore.load(applicationContext)
+        CameraSettingsStore.applyToController(controller, settings)
+        controller.isVideoMode = true
+        controller.resetRepeatCount()
+        startBackgroundRecording()
     }
 
     fun stopBackgroundRecording() {
@@ -255,6 +286,7 @@ class CameraForegroundService : LifecycleService() {
         const val CHANNEL_ID = "background_sync_channel"
         const val ACTION_START_RECORDING = "com.example.camera2study.ACTION_START_RECORDING"
         const val ACTION_STOP_RECORDING = "com.example.camera2study.ACTION_STOP_RECORDING"
+        const val ACTION_TOGGLE_RECORDING = "com.example.camera2study.ACTION_TOGGLE_RECORDING"
 
         // 백그라운드 종료를 위한 볼륨 버튼 길게 누르기 임계값 (2초)
         private const val LONG_PRESS_MS = 2000L

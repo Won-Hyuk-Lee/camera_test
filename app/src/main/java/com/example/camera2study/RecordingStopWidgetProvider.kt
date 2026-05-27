@@ -5,6 +5,7 @@ import android.appwidget.AppWidgetManager
 import android.appwidget.AppWidgetProvider
 import android.content.Context
 import android.content.Intent
+import android.os.Build
 import android.widget.RemoteViews
 
 class RecordingStopWidgetProvider : AppWidgetProvider() {
@@ -20,14 +21,18 @@ class RecordingStopWidgetProvider : AppWidgetProvider() {
     }
 
     override fun onReceive(context: Context, intent: Intent) {
-        if (intent.action == ACTION_STOP_FROM_WIDGET) {
-            val stopIntent = Intent(context, CameraForegroundService::class.java).apply {
-                action = CameraForegroundService.ACTION_STOP_RECORDING
+        if (intent.action == ACTION_TOGGLE_FROM_WIDGET) {
+            val serviceIntent = Intent(context, CameraForegroundService::class.java).apply {
+                action = CameraForegroundService.ACTION_TOGGLE_RECORDING
             }
             try {
-                context.startService(stopIntent)
-            } catch (_: IllegalStateException) {
-                // If the recording service is not already alive, there is nothing to stop.
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    context.startForegroundService(serviceIntent)
+                } else {
+                    context.startService(serviceIntent)
+                }
+            } catch (_: Exception) {
+                // Widget taps can arrive after permissions or service state have changed.
             }
             return
         }
@@ -35,8 +40,8 @@ class RecordingStopWidgetProvider : AppWidgetProvider() {
     }
 
     companion object {
-        private const val ACTION_STOP_FROM_WIDGET =
-            "com.example.camera2study.ACTION_STOP_FROM_WIDGET"
+        private const val ACTION_TOGGLE_FROM_WIDGET =
+            "com.example.camera2study.ACTION_TOGGLE_FROM_WIDGET"
 
         private fun updateWidget(
             context: Context,
@@ -45,7 +50,7 @@ class RecordingStopWidgetProvider : AppWidgetProvider() {
         ) {
             val views = RemoteViews(context.packageName, R.layout.widget_stop_recording)
             val intent = Intent(context, RecordingStopWidgetProvider::class.java).apply {
-                action = ACTION_STOP_FROM_WIDGET
+                action = ACTION_TOGGLE_FROM_WIDGET
             }
             val pendingIntent = PendingIntent.getBroadcast(
                 context,
