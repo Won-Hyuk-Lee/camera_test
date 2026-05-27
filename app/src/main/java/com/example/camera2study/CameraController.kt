@@ -5,7 +5,6 @@ import android.content.ContentValues
 import android.content.Context
 import android.hardware.camera2.CameraMetadata
 import android.hardware.camera2.CaptureRequest
-import android.media.AudioManager
 import android.os.Handler
 import android.os.Looper
 import android.os.PowerManager
@@ -46,6 +45,9 @@ class CameraController(private val context: Context) {
         const val RATIO_3_4 = 0
         const val RATIO_16_9 = 1
         const val RATIO_FULL = 2
+
+        private const val LONG_RECORDING_SEGMENT_MS = 30 * 60 * 1000L
+        private const val WAKE_LOCK_GRACE_MS = 60 * 1000L
     }
 
     private var cameraProvider: ProcessCameraProvider? = null
@@ -61,6 +63,7 @@ class CameraController(private val context: Context) {
 
     private var lensFacing: Int = CameraSelector.LENS_FACING_BACK
     private var targetBackCameraId: String? = null
+    private var pendingZoomAfterBind: Float? = null
 
     private var awbMode: Int = CameraMetadata.CONTROL_AWB_MODE_AUTO
     private var exposureTimeNs: Long? = null
@@ -69,6 +72,9 @@ class CameraController(private val context: Context) {
 
     // --- 신규 설정값 ---
     var zoomRatio: Float = 1.0f
+        private set
+
+    var selectedZoomModeRatio: Float = 1.0f
         private set
 
     var videoQuality: Quality = Quality.HD
@@ -81,7 +87,7 @@ class CameraController(private val context: Context) {
             }
         }
 
-    var maxDurationMs: Long = 0L // 0이면 무제한
+    var maxDurationMs: Long = 0L // 0이면 30분 파일 단위로 무제한 이어 찍기
     var maxRepeatCount: Int = 1  // 기본 1회 (반복 없음)
     var currentRepeatCount: Int = 0
         private set
@@ -130,10 +136,6 @@ class CameraController(private val context: Context) {
         }
 
     var isPrivateSave: Boolean = true // 기본 비공개 보관함 저장
-    var isAudioMuted: Boolean = false // 기본 마이크 켬
-    var isMuteSound: Boolean = false  // 기본 무음 꺼짐
-
-    private var savedRingerMode: Int = -1
 
     // 타이머 핸들러 (최대 녹화 시간 제어용)
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -173,10 +175,6 @@ class CameraController(private val context: Context) {
         val future = ProcessCameraProvider.getInstance(context)
         future.addListener({
             cameraProvider = future.get()
-            if (targetBackCameraId == null) {
-                targetBackCameraId = backLenses.firstOrNull { it.isWide }?.cameraId
-                    ?: backLenses.firstOrNull()?.cameraId
-            }
             bindUseCases()
             onReady()
         }, ContextCompat.getMainExecutor(context))
@@ -271,6 +269,7 @@ class CameraController(private val context: Context) {
             videoCapture = videoUseCase
 
             applyOptionsLive()
+            applyPendingZoomAfterBind()
             updateZoomBounds()
 
             val activeId = camera?.let { Camera2CameraInfo.from(it.cameraInfo).cameraId }
@@ -372,6 +371,64 @@ class CameraController(private val context: Context) {
         return camera?.cameraInfo?.zoomState?.value?.maxZoomRatio ?: 8.0f
     }
 
+    fun selectBackZoomMode(modeRatio: Float): Boolean {
+        if (isRecording()) return false
+
+        lensFacing = CameraSelector.LENS_FACING_BACK
+        selectedZoomModeRatio = if (modeRatio < 1.0f) 0.6f else 1.0f
+
+        if (selectedZoomModeRatio >= 1.0f) {
+            targetBackCameraId = null
+            pendingZoomAfterBind = 1.0f
+            bindUseCases()
+            return true
+        }
+
+        val currentMin = getMinZoomRatio()
+        if (targetBackCameraId == null && currentMin <= selectedZoomModeRatio) {
+            setZoomRatio(selectedZoomModeRatio)
+            return true
+        }
+
+        targetBackCameraId = findUltraWideCameraId()
+        pendingZoomAfterBind = selectedZoomModeRatio
+        bindUseCases()
+        return true
+    }
+
+    private fun applyPendingZoomAfterBind() {
+        val requested = pendingZoomAfterBind ?: return
+        pendingZoomAfterBind = null
+
+        val min = getMinZoomRatio()
+        val applied = if (requested < 1.0f && min > requested) {
+            1.0f
+        } else {
+            requested
+        }
+        setZoomRatio(applied)
+    }
+
+    private fun findUltraWideCameraId(): String? {
+        val availableIds = cameraProvider?.availableCameraInfos
+            ?.mapNotNull { info ->
+                runCatching { Camera2CameraInfo.from(info).cameraId }.getOrNull()
+            }
+            ?.toSet()
+            .orEmpty()
+        val availableBackLenses = if (availableIds.isEmpty()) {
+            backLenses
+        } else {
+            backLenses.filter { it.cameraId in availableIds }
+        }
+
+        return availableBackLenses
+            .filter { it.minZoomRatio <= 0.65f }
+            .minByOrNull { it.minZoomRatio }
+            ?.cameraId
+            ?: availableBackLenses.firstOrNull { it.isWide }?.cameraId
+    }
+
     private fun updateZoomBounds() {
         val cam = camera ?: return
         val zoomState = cam.cameraInfo.zoomState.value ?: return
@@ -396,11 +453,12 @@ class CameraController(private val context: Context) {
         lensFacing = if (lensFacing == CameraSelector.LENS_FACING_BACK)
             CameraSelector.LENS_FACING_FRONT else CameraSelector.LENS_FACING_BACK
         if (lensFacing == CameraSelector.LENS_FACING_BACK) {
-            targetBackCameraId = backLenses.firstOrNull { it.isWide }?.cameraId
-                ?: backLenses.firstOrNull()?.cameraId
+            targetBackCameraId = null
         } else {
             targetBackCameraId = null
         }
+        selectedZoomModeRatio = 1.0f
+        pendingZoomAfterBind = 1.0f
         bindUseCases()
     }
 
@@ -408,6 +466,8 @@ class CameraController(private val context: Context) {
         if (isRecording()) return
         lensFacing = CameraSelector.LENS_FACING_BACK
         targetBackCameraId = cameraId
+        selectedZoomModeRatio = 1.0f
+        pendingZoomAfterBind = 1.0f
         bindUseCases()
     }
 
@@ -454,26 +514,9 @@ class CameraController(private val context: Context) {
     }
 
 
-    // --- 촬영 무음 유틸리티 ---
-    private fun muteSystemSound() {
-        if (!isMuteSound) return
-        val am = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
-        savedRingerMode = am.ringerMode
-        am.ringerMode = AudioManager.RINGER_MODE_SILENT
-    }
-
-    private fun restoreSystemSound() {
-        if (!isMuteSound || savedRingerMode == -1) return
-        val am = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
-        am.ringerMode = savedRingerMode
-        savedRingerMode = -1
-    }
-
     // --- 사진 촬영 (Take Picture) ---
     fun takePicture(onSuccess: (File) -> Unit, onError: (ImageCaptureException) -> Unit) {
         val ic = imageCapture ?: return
-        
-        muteSystemSound()
 
         val name = "StudyVault_${System.currentTimeMillis()}.jpg"
         val outputFileOptions = if (isPrivateSave) {
@@ -502,7 +545,6 @@ class CameraController(private val context: Context) {
             ContextCompat.getMainExecutor(context),
             object : ImageCapture.OnImageSavedCallback {
                 override fun onImageSaved(outputFileResults: ImageCapture.OutputFileResults) {
-                    restoreSystemSound()
                     val savedFile = if (isPrivateSave) {
                         File(File(context.getExternalFilesDir(null), "private_vault"), name)
                     } else {
@@ -513,7 +555,6 @@ class CameraController(private val context: Context) {
                 }
 
                 override fun onError(exception: ImageCaptureException) {
-                    restoreSystemSound()
                     onError(exception)
                 }
             }
@@ -526,16 +567,8 @@ class CameraController(private val context: Context) {
         val vc = videoCapture ?: return
         if (recording != null) return
 
-        muteSystemSound()
-
         // 화면 꺼짐 대기 상태에서 CPU 슬립을 막기 위해 WakeLock 획득
-        if (wakeLock == null) {
-            val pm = context.getSystemService(Context.POWER_SERVICE) as PowerManager
-            wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "Camera2Study::WakeLock")
-        }
-        if (wakeLock?.isHeld == false) {
-            wakeLock?.acquire(30 * 60 * 1000L) // 최대 30분 유지
-        }
+        renewWakeLock(currentSegmentDurationMs() + WAKE_LOCK_GRACE_MS)
 
         val name = "StudyVault_${System.currentTimeMillis()}.mp4"
         val prep = if (isPrivateSave) {
@@ -564,19 +597,14 @@ class CameraController(private val context: Context) {
         isRecordingPaused = false
         totalPausedMs = 0L
 
-        if (!isAudioMuted) {
-            prep.withAudioEnabled()
-        }
+        prep.withAudioEnabled()
 
         recording = prep.start(ContextCompat.getMainExecutor(context)) { event: VideoRecordEvent ->
-            onRecordingEvent?.invoke(event)
-
             if (event is VideoRecordEvent.Start) {
                 recordingStartElapsedMs = android.os.SystemClock.elapsedRealtime()
-                if (maxDurationMs > 0) {
-                    mainHandler.removeCallbacks(autoStopRunnable)
-                    mainHandler.postDelayed(autoStopRunnable, maxDurationMs)
-                }
+                mainHandler.removeCallbacks(autoStopRunnable)
+                mainHandler.postDelayed(autoStopRunnable, currentSegmentDurationMs())
+                onRecordingEvent?.invoke(event)
             }
 
             if (event is VideoRecordEvent.Pause) {
@@ -584,6 +612,7 @@ class CameraController(private val context: Context) {
                 pauseStartElapsedMs = android.os.SystemClock.elapsedRealtime()
                 // pause 동안 auto-stop 타이머를 멈춘다.
                 mainHandler.removeCallbacks(autoStopRunnable)
+                onRecordingEvent?.invoke(event)
             }
 
             if (event is VideoRecordEvent.Resume) {
@@ -591,20 +620,18 @@ class CameraController(private val context: Context) {
                 val pausedSegment = android.os.SystemClock.elapsedRealtime() - pauseStartElapsedMs
                 totalPausedMs += pausedSegment
                 // 잔여 시간 기준으로 auto-stop 재예약한다.
-                if (maxDurationMs > 0) {
-                    val elapsed = android.os.SystemClock.elapsedRealtime() - recordingStartElapsedMs - totalPausedMs
-                    val remaining = maxDurationMs - elapsed
-                    if (remaining > 0) {
-                        mainHandler.postDelayed(autoStopRunnable, remaining)
-                    } else {
-                        isAutoStopping = true
-                        stopRecording()
-                    }
+                val elapsed = android.os.SystemClock.elapsedRealtime() - recordingStartElapsedMs - totalPausedMs
+                val remaining = currentSegmentDurationMs() - elapsed
+                if (remaining > 0) {
+                    mainHandler.postDelayed(autoStopRunnable, remaining)
+                } else {
+                    isAutoStopping = true
+                    stopRecording()
                 }
+                onRecordingEvent?.invoke(event)
             }
 
             if (event is VideoRecordEvent.Finalize) {
-                restoreSystemSound()
                 mainHandler.removeCallbacks(autoStopRunnable)
                 recording = null
                 isRecordingPaused = false
@@ -614,11 +641,11 @@ class CameraController(private val context: Context) {
                 isAutoStopping = false
 
                 val willRepeat = wasAutoStop && !event.hasError() &&
-                    (currentRepeatCount + 1) < maxRepeatCount
+                    (isUnlimitedSegmentSession() || (currentRepeatCount + 1) < maxRepeatCount)
 
                 if (wasAutoStop && !event.hasError()) {
                     currentRepeatCount++
-                    if (currentRepeatCount < maxRepeatCount) {
+                    if (isUnlimitedSegmentSession() || currentRepeatCount < maxRepeatCount) {
                         mainHandler.postDelayed({
                             startRecording()
                         }, 500L)
@@ -632,6 +659,7 @@ class CameraController(private val context: Context) {
                 }
 
                 // 반복 녹화로 이어지지 않는 진짜 종료 시점에만 service 정리 신호를 보낸다.
+                onRecordingEvent?.invoke(event)
                 if (!willRepeat) {
                     onFinalizeEnded?.invoke()
                 }
@@ -641,6 +669,25 @@ class CameraController(private val context: Context) {
 
     fun resetRepeatCount() {
         currentRepeatCount = 0
+    }
+
+    private fun currentSegmentDurationMs(): Long =
+        if (maxDurationMs > 0) maxDurationMs else LONG_RECORDING_SEGMENT_MS
+
+    private fun isUnlimitedSegmentSession(): Boolean = maxDurationMs == 0L
+
+    @SuppressLint("InvalidWakeLockTag")
+    private fun renewWakeLock(timeoutMs: Long) {
+        if (wakeLock == null) {
+            val pm = context.getSystemService(Context.POWER_SERVICE) as PowerManager
+            wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "Camera2Study::WakeLock").apply {
+                setReferenceCounted(false)
+            }
+        }
+        if (wakeLock?.isHeld == true) {
+            wakeLock?.release()
+        }
+        wakeLock?.acquire(timeoutMs)
     }
 
     private fun releaseWakeLock() {

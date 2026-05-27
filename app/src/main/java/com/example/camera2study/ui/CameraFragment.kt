@@ -223,8 +223,6 @@ class CameraFragment : Fragment() {
         binding.txtModeVideo.setTextColor(Color.parseColor("#8AFFFFFF"))
 
         binding.shutterCenter.setBackgroundResource(R.drawable.shutter_center_photo)
-        // 사진 모드에서는 마이크 버튼을 완전히 숨긴다.
-        binding.btnMuteAudio.visibility = View.GONE
 
         binding.txtTimer.visibility = View.INVISIBLE
     }
@@ -236,9 +234,6 @@ class CameraFragment : Fragment() {
         binding.txtModeVideo.setTextColor(Color.parseColor("#FFC107"))
 
         binding.shutterCenter.setBackgroundResource(R.drawable.shutter_center_video)
-        binding.btnMuteAudio.visibility = View.VISIBLE
-        binding.btnMuteAudio.alpha = 1.0f
-        binding.btnMuteAudio.isEnabled = true
 
         binding.txtTimer.visibility = View.VISIBLE
     }
@@ -248,8 +243,9 @@ class CameraFragment : Fragment() {
             binding.txtLensInfo.text = ""
             return
         }
-        val facing = if (controller.isFacingBack()) "후면" else "전면"
-        binding.txtLensInfo.text = "$facing ${"%.1fx".format(controller.zoomRatio)}"
+        val lensFacingLabel = if (controller.isFacingBack()) "후면" else "전면"
+        val zoomModeLabel = if (controller.selectedZoomModeRatio < 1.0f) "0.6x 광각" else "1.0x 기본"
+        binding.txtLensInfo.text = "$lensFacingLabel $zoomModeLabel"
     }
 
     private data class ZoomPreset(val button: MaterialButton, val ratio: Float)
@@ -257,11 +253,7 @@ class CameraFragment : Fragment() {
     private val zoomPresets: List<ZoomPreset>
         get() = listOf(
             ZoomPreset(binding.btnZoom06, 0.6f),
-            ZoomPreset(binding.btnZoom10, 1.0f),
-            ZoomPreset(binding.btnZoom20, 2.0f),
-            ZoomPreset(binding.btnZoom30, 3.0f),
-            ZoomPreset(binding.btnZoom50, 5.0f),
-            ZoomPreset(binding.btnZoom100, 10.0f)
+            ZoomPreset(binding.btnZoom10, 1.0f)
         )
 
     private fun setupZoomListeners() {
@@ -270,12 +262,19 @@ class CameraFragment : Fragment() {
         val min = controller.getMinZoomRatio()
         val max = controller.getMaxZoomRatio()
 
+        binding.btnZoom20.visibility = View.GONE
+        binding.btnZoom30.visibility = View.GONE
+        binding.btnZoom50.visibility = View.GONE
+        binding.btnZoom100.visibility = View.GONE
+        binding.sliderZoom.visibility = View.GONE
+
         // 단말이 지원하지 않는 프리셋은 숨긴다.
         zoomPresets.forEach { preset ->
-            preset.button.visibility = if (preset.ratio in min..max) View.VISIBLE else View.GONE
+            preset.button.visibility = View.VISIBLE
             preset.button.setOnClickListener {
-                controller.setZoomRatio(preset.ratio)
-                saveCameraSettings()
+                if (controller.selectBackZoomMode(preset.ratio)) {
+                    saveCameraSettings()
+                }
             }
         }
 
@@ -297,10 +296,9 @@ class CameraFragment : Fragment() {
         binding.sliderZoom.value = current.coerceIn(binding.sliderZoom.valueFrom, max)
 
         // 현재 배율과 가장 가까운 프리셋만 활성 색상.
-        val nearest = zoomPresets.filter { it.button.visibility == View.VISIBLE }
-            .minByOrNull { kotlin.math.abs(it.ratio - current) }
+        val activeMode = if (::controller.isInitialized) controller.selectedZoomModeRatio else current
         zoomPresets.forEach { preset ->
-            val active = preset === nearest && kotlin.math.abs(preset.ratio - current) < 0.25f
+            val active = kotlin.math.abs(preset.ratio - activeMode) < 0.05f
             preset.button.setTextColor(if (active) Color.parseColor("#FFC107") else Color.WHITE)
         }
     }
@@ -425,23 +423,6 @@ class CameraFragment : Fragment() {
             binding.btnGridToggle.setTextColor(if (visible) Color.WHITE else Color.parseColor("#FFC107"))
         }
 
-        // 2. 마이크 토글
-        binding.btnMuteAudio.setOnClickListener {
-            controller.isAudioMuted = !controller.isAudioMuted
-            val muted = controller.isAudioMuted
-            binding.btnMuteAudio.text = if (muted) "🔇 소리 끔" else "🎤 소리 켬"
-            binding.btnMuteAudio.setTextColor(if (muted) Color.parseColor("#FF5252") else Color.WHITE)
-            saveCameraSettings()
-        }
-
-        // 3. 무음 토글
-        binding.btnMuteSound.setOnClickListener {
-            controller.isMuteSound = !controller.isMuteSound
-            val mute = controller.isMuteSound
-            binding.btnMuteSound.text = if (mute) "🔇 무음 ON" else "🔊 무음 OFF"
-            binding.btnMuteSound.setTextColor(if (mute) Color.parseColor("#FFC107") else Color.WHITE)
-            saveCameraSettings()
-        }
     }
 
 
@@ -629,8 +610,7 @@ class CameraFragment : Fragment() {
             putString("last_camera_id", controller.activeCameraId())
             putBoolean("last_lens_facing_back", controller.isFacingBack())
             putFloat("last_zoom_ratio", controller.zoomRatio)
-            putBoolean("last_audio_muted", controller.isAudioMuted)
-            putBoolean("last_mute_sound", controller.isMuteSound)
+            putFloat("last_zoom_mode", controller.selectedZoomModeRatio)
             putInt("last_ratio_mode", controller.currentRatioMode)
             putInt("last_fps", controller.targetFps)
             putBoolean("last_hdr", controller.isHdrEnabled)
@@ -642,11 +622,9 @@ class CameraFragment : Fragment() {
     private fun restoreCameraSettings() {
         if (!::controller.isInitialized) return
         val sp = requireContext().getSharedPreferences("camera_pref", Context.MODE_PRIVATE)
-        val lastCameraId = sp.getString("last_camera_id", null)
         val lastFacingBack = sp.getBoolean("last_lens_facing_back", true)
         val lastZoom = sp.getFloat("last_zoom_ratio", 1.0f)
-        val lastAudioMuted = sp.getBoolean("last_audio_muted", false)
-        val lastMuteSound = sp.getBoolean("last_mute_sound", false)
+        val lastZoomMode = sp.getFloat("last_zoom_mode", 1.0f)
         val lastRatioMode = sp.getInt("last_ratio_mode", CameraController.RATIO_3_4)
         val lastFps = sp.getInt("last_fps", 30)
         val lastHdr = sp.getBoolean("last_hdr", false)
@@ -655,23 +633,15 @@ class CameraFragment : Fragment() {
         if (!lastFacingBack && controller.isFacingBack()) {
             controller.switchFacing()
         }
-        lastCameraId?.let { id ->
-            if (controller.isFacingBack()) {
-                controller.selectBackLens(id)
-            }
+        if (controller.isFacingBack()) {
+            controller.selectBackZoomMode(lastZoomMode)
+        } else {
+            controller.setZoomRatio(lastZoom)
         }
-        controller.setZoomRatio(lastZoom)
-        controller.isAudioMuted = lastAudioMuted
-        controller.isMuteSound = lastMuteSound
         controller.targetFps = lastFps
         controller.isHdrEnabled = lastHdr
         controller.isProMode = lastProMode
-        
-        binding.btnMuteAudio.text = if (lastAudioMuted) "🔇 소리 끔" else "🎤 소리 켬"
-        binding.btnMuteAudio.setTextColor(if (lastAudioMuted) Color.parseColor("#FF5252") else Color.WHITE)
-        binding.btnMuteSound.text = if (lastMuteSound) "🔇 무음 ON" else "🔊 무음 OFF"
-        binding.btnMuteSound.setTextColor(if (lastMuteSound) Color.parseColor("#FFC107") else Color.WHITE)
-        
+
         updateRatioSelection(lastRatioMode)
     }
 

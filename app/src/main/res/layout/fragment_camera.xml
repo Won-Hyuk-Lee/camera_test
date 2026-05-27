@@ -76,26 +76,6 @@
             android:text="📐 격자 OFF"
             android:textColor="@android:color/white"
             android:textSize="11sp" />
-
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/btnMuteAudio"
-            style="@style/Widget.Material3.Button.TextButton"
-            android:layout_width="0dp"
-            android:layout_weight="1"
-            android:layout_height="wrap_content"
-            android:text="🎤 소리 켬"
-            android:textColor="@android:color/white"
-            android:textSize="11sp" />
-
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/btnMuteSound"
-            style="@style/Widget.Material3.Button.TextButton"
-            android:layout_width="0dp"
-            android:layout_weight="1"
-            android:layout_height="wrap_content"
-            android:text="🔊 무음 OFF"
-            android:textColor="@android:color/white"
-            android:textSize="11sp" />
     </LinearLayout>
 
     <!-- 실시간 렌즈 정보 및 타이머 오버레이 -->
@@ -204,7 +184,7 @@
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btnZoom06"
                 style="@style/Widget.Material3.Button.TextButton"
-                android:layout_width="44dp"
+                android:layout_width="64dp"
                 android:layout_height="36dp"
                 android:text="0.6x"
                 android:textColor="@android:color/white"
@@ -216,9 +196,9 @@
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btnZoom10"
                 style="@style/Widget.Material3.Button.TextButton"
-                android:layout_width="44dp"
+                android:layout_width="64dp"
                 android:layout_height="36dp"
-                android:text="1x"
+                android:text="1.0x"
                 android:textColor="#FFC107"
                 android:textSize="10sp"
                 android:insetTop="0dp"
@@ -230,6 +210,7 @@
                 style="@style/Widget.Material3.Button.TextButton"
                 android:layout_width="44dp"
                 android:layout_height="36dp"
+                android:visibility="gone"
                 android:text="2x"
                 android:textColor="@android:color/white"
                 android:textSize="10sp"
@@ -242,6 +223,7 @@
                 style="@style/Widget.Material3.Button.TextButton"
                 android:layout_width="44dp"
                 android:layout_height="36dp"
+                android:visibility="gone"
                 android:text="3x"
                 android:textColor="@android:color/white"
                 android:textSize="10sp"
@@ -254,6 +236,7 @@
                 style="@style/Widget.Material3.Button.TextButton"
                 android:layout_width="44dp"
                 android:layout_height="36dp"
+                android:visibility="gone"
                 android:text="5x"
                 android:textColor="@android:color/white"
                 android:textSize="10sp"
@@ -266,6 +249,7 @@
                 style="@style/Widget.Material3.Button.TextButton"
                 android:layout_width="44dp"
                 android:layout_height="36dp"
+                android:visibility="gone"
                 android:text="10x"
                 android:textColor="@android:color/white"
                 android:textSize="10sp"
@@ -278,6 +262,7 @@
             android:id="@+id/sliderZoom"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
+            android:visibility="gone"
             android:valueFrom="0.6"
             android:valueTo="10.0"
             android:value="1.0"

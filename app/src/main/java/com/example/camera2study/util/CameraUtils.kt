@@ -3,11 +3,14 @@ package com.example.camera2study.util
 import android.content.Context
 import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraManager
+import android.os.Build
 
 data class LensInfo(
     val cameraId: String,
     val focalLength: Float,
-    val isWide: Boolean
+    val isWide: Boolean,
+    val minZoomRatio: Float,
+    val maxZoomRatio: Float
 )
 
 object CameraUtils {
@@ -23,13 +26,24 @@ object CameraUtils {
             if (facing != CameraCharacteristics.LENS_FACING_BACK) return@mapNotNull null
             val focal = chars.get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)?.minOrNull()
                 ?: return@mapNotNull null
-            id to focal
-        }.sortedBy { it.second }
+            val zoomRange = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                chars.get(CameraCharacteristics.CONTROL_ZOOM_RATIO_RANGE)
+            } else {
+                null
+            }
+            LensInfo(
+                cameraId = id,
+                focalLength = focal,
+                isWide = false,
+                minZoomRatio = zoomRange?.lower ?: 1.0f,
+                maxZoomRatio = zoomRange?.upper ?: 1.0f
+            )
+        }.sortedBy { it.focalLength }
 
         if (raw.isEmpty()) return emptyList()
-        val minFocal = raw.first().second
-        return raw.map { (id, focal) ->
-            LensInfo(id, focal, isWide = focal <= minFocal + 0.01f)
+        val minFocal = raw.first().focalLength
+        return raw.map { lens ->
+            lens.copy(isWide = lens.focalLength <= minFocal + 0.01f)
         }
     }
 
