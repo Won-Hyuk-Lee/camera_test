@@ -212,7 +212,7 @@
                         android:background="#1AFFFFFF"
                         android:layout_marginVertical="12dp" />
 
-                    <!-- 알림 권한 -->
+                    <!-- 알림 노출 최소화 -->
                     <LinearLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
@@ -223,7 +223,7 @@
                             android:layout_width="0dp"
                             android:layout_height="wrap_content"
                             android:layout_weight="1"
-                            android:text="🔔 알림 (Notification) 권한"
+                            android:text="🔔 알림창 노출"
                             android:textColor="@android:color/white"
                             android:textSize="13sp"
                             android:textStyle="bold" />
@@ -232,8 +232,8 @@
                             android:id="@+id/txtPermNotification"
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:text="미허용"
-                            android:textColor="#FF5252"
+                            android:text="선택 사항"
+                            android:textColor="#FFC107"
                             android:textSize="12sp"
                             android:textStyle="bold" />
                     </LinearLayout>
@@ -244,7 +244,7 @@
                         android:background="#1AFFFFFF"
                         android:layout_marginVertical="12dp" />
 
-                    <!-- 100% 무알림 위장 촬영 (시스템 설정 연동) -->
+                    <!-- 알림 최소화 안내 (시스템 설정 연동) -->
                     <LinearLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
@@ -253,7 +253,7 @@
                         <TextView
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:text="🤫 100% 무알림 위장 촬영 팁 (권장)"
+                            android:text="🔕 알림 최소화"
                             android:textColor="#FFC107"
                             android:textSize="13sp"
                             android:textStyle="bold" />
@@ -262,7 +262,7 @@
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
                             android:layout_marginTop="4dp"
-                            android:text="포그라운드 서비스 알림도 완벽히 소거하여 화면과 상단바에 흔적을 남기지 않으려면, 아래 버튼을 눌러 앱 알림 권한을 '허용 안 함'으로 직접 비활성화하세요."
+                            android:text="앱 알림을 끄면 알림창 노출을 줄일 수 있습니다. 단, Android의 활성 앱 표시와 카메라/마이크 사용 표시기는 숨길 수 없습니다."
                             android:textColor="#B3FFFFFF"
                             android:textSize="11sp" />
 
@@ -272,7 +272,7 @@
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
                             android:layout_marginTop="8dp"
-                            android:text="🤫 알림 노출 완전히 끄기"
+                            android:text="알림 설정 열기"
                             android:textSize="12sp" />
                     </LinearLayout>
 
@@ -283,6 +283,96 @@
                         android:layout_height="wrap_content"
                         android:layout_marginTop="20dp"
                         android:text="🔑 누락된 필수 권한 승인하기"
+                        android:textSize="12sp" />
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="28dp"
+                android:text="PIN 진입 설정"
+                android:textColor="@android:color/white"
+                android:textSize="15sp"
+                android:textStyle="bold" />
+
+            <com.google.android.material.card.MaterialCardView
+                style="@style/Widget.Material3.CardView.Filled"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                app:cardBackgroundColor="#1AFFFFFF"
+                app:cardCornerRadius="16dp"
+                app:strokeColor="#33FFFFFF"
+                app:strokeWidth="1dp">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="16dp">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal">
+
+                        <TextView
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="4자리 PIN 잠금"
+                            android:textColor="@android:color/white"
+                            android:textSize="13sp"
+                            android:textStyle="bold" />
+
+                        <TextView
+                            android:id="@+id/txtPinState"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="꺼짐"
+                            android:textColor="#8AFFFFFF"
+                            android:textSize="12sp"
+                            android:textStyle="bold" />
+                    </LinearLayout>
+
+                    <com.google.android.material.switchmaterial.SwitchMaterial
+                        android:id="@+id/switchPinLock"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="10dp"
+                        android:text="계산기 = 버튼 롱프레스 후 PIN 요구"
+                        android:textColor="#B3FFFFFF"
+                        android:textSize="12sp" />
+
+                    <com.google.android.material.textfield.TextInputLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="10dp"
+                        android:hint="PIN 4자리"
+                        app:boxBackgroundColor="#1A000000"
+                        app:boxStrokeColor="#66FFFFFF"
+                        app:hintTextColor="#8AFFFFFF">
+
+                        <com.google.android.material.textfield.TextInputEditText
+                            android:id="@+id/inputPinCode"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:digits="0123456789"
+                            android:inputType="numberPassword"
+                            android:maxLength="4"
+                            android:textColor="@android:color/white"
+                            android:textSize="14sp" />
+                    </com.google.android.material.textfield.TextInputLayout>
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btnSavePin"
+                        style="@style/Widget.Material3.Button.TonalButton"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="12dp"
+                        android:text="PIN 설정 저장"
                         android:textSize="12sp" />
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>

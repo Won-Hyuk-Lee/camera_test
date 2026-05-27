@@ -5,7 +5,6 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Color
-import android.os.Build
 import android.os.Bundle
 import android.os.PowerManager
 import android.provider.Settings
@@ -18,6 +17,7 @@ import androidx.core.content.ContextCompat
 import androidx.fragment.app.Fragment
 import com.example.camera2study.databinding.FragmentSettingsBinding
 import com.example.camera2study.util.PermissionHelper
+import com.example.camera2study.util.SecurityPrefs
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 
 class SettingsFragment : Fragment() {
@@ -75,12 +75,49 @@ class SettingsFragment : Fragment() {
                 }
             }
         }
+
+        setupPinControls()
     }
 
     override fun onResume() {
         super.onResume()
         checkBatteryState()
         checkPermissionsState()
+        syncPinControls()
+    }
+
+    private fun setupPinControls() {
+        syncPinControls()
+        binding.btnSavePin.setOnClickListener {
+            val pin = binding.inputPinCode.text?.toString().orEmpty()
+            val enabled = binding.switchPinLock.isChecked
+
+            if (enabled) {
+                if (!SecurityPrefs.isValidPin(pin)) {
+                    Toast.makeText(requireContext(), "PIN은 숫자 4자리로 입력하세요.", Toast.LENGTH_SHORT).show()
+                    return@setOnClickListener
+                }
+                SecurityPrefs.savePin(requireContext(), pin)
+                binding.inputPinCode.text?.clear()
+                Toast.makeText(requireContext(), "PIN 잠금이 활성화되었습니다.", Toast.LENGTH_SHORT).show()
+            } else {
+                SecurityPrefs.setPinEnabled(requireContext(), false)
+                binding.inputPinCode.text?.clear()
+                Toast.makeText(requireContext(), "PIN 잠금이 꺼졌습니다.", Toast.LENGTH_SHORT).show()
+            }
+
+            syncPinControls()
+        }
+    }
+
+    private fun syncPinControls() {
+        if (_binding == null) return
+        val enabled = SecurityPrefs.isPinEnabled(requireContext())
+        binding.switchPinLock.isChecked = enabled
+        binding.txtPinState.text = if (enabled) "활성화" else "꺼짐"
+        binding.txtPinState.setTextColor(
+            Color.parseColor(if (enabled) "#4CAF50" else "#8AFFFFFF")
+        )
     }
 
     private fun checkBatteryState() {
@@ -112,14 +149,8 @@ class SettingsFragment : Fragment() {
         val audioGranted = ContextCompat.checkSelfPermission(ctx, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
         updatePermissionText(binding.txtPermAudio, audioGranted)
 
-        // 3. 알림 (Android 13 이상만 실질적 체크)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            val notiGranted = ContextCompat.checkSelfPermission(ctx, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
-            updatePermissionText(binding.txtPermNotification, notiGranted)
-        } else {
-            binding.txtPermNotification.text = "허용 완료 (불필요)"
-            binding.txtPermNotification.setTextColor(Color.parseColor("#4CAF50"))
-        }
+        binding.txtPermNotification.text = "선택 사항"
+        binding.txtPermNotification.setTextColor(Color.parseColor("#FFC107"))
 
         // 전체 획득 상태이면 버튼 비활성화
         if (PermissionHelper.allGranted(ctx)) {

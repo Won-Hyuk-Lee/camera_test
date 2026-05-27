@@ -1,0 +1,108 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.constraintlayout.widget.ConstraintLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#111315"
+    android:fitsSystemWindows="true"
+    android:padding="24dp">
+
+    <TextView
+        android:id="@+id/txtPinTitle"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="PIN"
+        android:textColor="@android:color/white"
+        android:textSize="22sp"
+        android:textStyle="bold"
+        app:layout_constraintBottom_toTopOf="@id/txtPinDots"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toTopOf="parent" />
+
+    <TextView
+        android:id="@+id/txtPinDots"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="22dp"
+        android:letterSpacing="0.08"
+        android:text="_  _  _  _"
+        android:textColor="@android:color/white"
+        android:textSize="30sp"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toBottomOf="@id/txtPinTitle" />
+
+    <LinearLayout
+        android:id="@+id/pinKeypad"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:layout_marginTop="40dp"
+        android:orientation="vertical"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintHeight_percent="0.56"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toBottomOf="@id/txtPinDots">
+
+        <LinearLayout style="@style/CalcRow">
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnPin1"
+                style="@style/CalcButtonNumber"
+                android:text="1" />
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnPin2"
+                style="@style/CalcButtonNumber"
+                android:text="2" />
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnPin3"
+                style="@style/CalcButtonNumber"
+                android:text="3" />
+        </LinearLayout>
+
+        <LinearLayout style="@style/CalcRow">
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnPin4"
+                style="@style/CalcButtonNumber"
+                android:text="4" />
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnPin5"
+                style="@style/CalcButtonNumber"
+                android:text="5" />
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnPin6"
+                style="@style/CalcButtonNumber"
+                android:text="6" />
+        </LinearLayout>
+
+        <LinearLayout style="@style/CalcRow">
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnPin7"
+                style="@style/CalcButtonNumber"
+                android:text="7" />
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnPin8"
+                style="@style/CalcButtonNumber"
+                android:text="8" />
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnPin9"
+                style="@style/CalcButtonNumber"
+                android:text="9" />
+        </LinearLayout>
+
+        <LinearLayout style="@style/CalcRow">
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnPinClear"
+                style="@style/CalcButtonFunction"
+                android:text="C" />
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnPin0"
+                style="@style/CalcButtonNumber"
+                android:text="0" />
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnPinBack"
+                style="@style/CalcButtonFunction"
+                android:text="DEL" />
+        </LinearLayout>
+    </LinearLayout>
+</androidx.constraintlayout.widget.ConstraintLayout>
