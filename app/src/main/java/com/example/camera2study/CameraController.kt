@@ -76,7 +76,17 @@ class CameraController(private val context: Context) {
     private var zoomReady = false
     private var exposureReady = false
     fun areControlsReady(): Boolean = zoomReady && exposureReady
-    private fun notifyControlsApplied() { if (zoomReady && exposureReady) onControlsApplied?.invoke() }
+    private fun notifyControlsApplied() {
+        if (!areControlsReady()) return
+        // Persist acknowledged live adjustments even if the recording screen is closed next.
+        // Quick recording keeps its explicitly saved profile independent of the normal profile.
+        if (isRecording() && session?.optString("source") == "app") {
+            val store = com.example.camera2study.util.CameraSettingsStore
+            store.save(context, store.load(context).copy(
+                zoomRatio = zoomRatio, zoomModeRatio = selectedZoomModeRatio, exposureEv = exposureEv))
+        }
+        onControlsApplied?.invoke()
+    }
     var lastError: String? = null
         private set
     var onError: ((String) -> Unit)? = null
