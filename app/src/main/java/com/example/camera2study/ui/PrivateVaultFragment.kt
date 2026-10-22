@@ -27,6 +27,8 @@ import androidx.recyclerview.widget.RecyclerView
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import com.example.camera2study.util.RecordingJournal
+import com.example.camera2study.util.VideoFiles
 import com.example.camera2study.R
 import com.example.camera2study.databinding.FragmentPrivateVaultBinding
 import com.example.camera2study.databinding.ItemVaultMediaBinding
@@ -41,6 +43,8 @@ class PrivateVaultFragment : Fragment() {
     private val binding get() = _binding!!
 
     private var mediaFiles = ArrayList<File>()
+    private val mediaInfo = mutableMapOf<String, VideoFiles.Info>()
+    private val exporting = mutableSetOf<String>()
     private lateinit var adapter: VaultAdapter
 
     override fun onCreateView(
@@ -61,10 +65,13 @@ class PrivateVaultFragment : Fragment() {
 
         setupRecyclerView()
         loadMediaFiles()
+        com.example.camera2study.RecordingRuntime.state.observe(viewLifecycleOwner) { state ->
+            if (!state.active) loadMediaFiles()
+        }
     }
 
     private fun setupRecyclerView() {
-        adapter = VaultAdapter(requireContext(), mediaFiles,
+        adapter = VaultAdapter(requireContext(), mediaFiles, mediaInfo,
             onItemClick = { file -> showMediaDetail(file) },
             onItemLongClick = { file -> showMediaManageOptions(file) }
         )
@@ -79,14 +86,17 @@ class PrivateVaultFragment : Fragment() {
         viewLifecycleOwner.lifecycleScope.launch {
             val sorted = withContext(Dispatchers.IO) {
                 if (!privateDir.exists()) privateDir.mkdirs()
-                privateDir.listFiles()
+                val files = privateDir.listFiles()
                     ?.filter { it.isFile && (it.name.endsWith(".jpg") || it.name.endsWith(".mp4")) }
                     ?.sortedByDescending { it.lastModified() }
                     .orEmpty()
+                files.map { it to VideoFiles.inspect(it) }
             }
             if (_binding == null) return@launch
             mediaFiles.clear()
-            mediaFiles.addAll(sorted)
+            mediaFiles.addAll(sorted.map { it.first })
+            mediaInfo.clear()
+            sorted.forEach { mediaInfo[it.first.absolutePath] = it.second }
             if (mediaFiles.isEmpty()) {
                 binding.emptyView.visibility = View.VISIBLE
                 binding.rvVaultMedia.visibility = View.GONE
@@ -100,6 +110,10 @@ class PrivateVaultFragment : Fragment() {
 
     // --- 인앱 뷰어 / 비디오 안전 플레이어 다이얼로그 ---
     private fun showMediaDetail(file: File) {
+        if (file.absolutePath in RecordingJournal.activePaths || mediaInfo[file.absolutePath]?.playable != true) {
+            Toast.makeText(requireContext(), mediaInfo[file.absolutePath]?.label ?: "파일 확인 필요", Toast.LENGTH_LONG).show()
+            return
+        }
         val ctx = requireContext()
         val customView = LayoutInflater.from(ctx).inflate(R.layout.dialog_media_viewer, null)
         val container = customView.findViewById<FrameLayout>(R.id.mediaContainer)
@@ -155,6 +169,10 @@ class PrivateVaultFragment : Fragment() {
 
     // --- 롱클릭 파일 관리 (내보내기 / 삭제) ---
     private fun showMediaManageOptions(file: File) {
+        if (file.absolutePath in RecordingJournal.activePaths || file.absolutePath in exporting) {
+            Toast.makeText(requireContext(), "기록 또는 내보내기 중인 파일은 변경할 수 없습니다", Toast.LENGTH_SHORT).show()
+            return
+        }
         val options = arrayOf("공개 갤러리로 내보내기 (Export)", "영구 삭제 (Delete)")
         MaterialAlertDialogBuilder(requireContext())
             .setTitle("파일 관리 (${file.name})")
@@ -168,53 +186,16 @@ class PrivateVaultFragment : Fragment() {
     }
 
     private fun exportToPublicGallery(file: File) {
-        val ctx = requireContext()
-        try {
-            val resolver = ctx.contentResolver
-            val isVideo = file.name.endsWith(".mp4")
-            
-            val values = ContentValues().apply {
-                put(MediaStore.MediaColumns.DISPLAY_NAME, "Exported_${file.name}")
-                if (isVideo) {
-                    put(MediaStore.MediaColumns.MIME_TYPE, "video/mp4")
-                    put(MediaStore.Video.Media.RELATIVE_PATH, "Movies/StudyVault")
-                } else {
-                    put(MediaStore.MediaColumns.MIME_TYPE, "image/jpeg")
-                    put(MediaStore.Images.Media.RELATIVE_PATH, "DCIM/StudyVault")
-                }
-            }
-
-            val targetUri = if (isVideo) {
-                resolver.insert(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, values)
-            } else {
-                resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
-            }
-
-            if (targetUri == null) {
-                Toast.makeText(ctx, "갤러리 인서트 실패", Toast.LENGTH_SHORT).show()
-                return
-            }
-
-            // 파일 복사
-            FileInputStream(file).use { input ->
-                resolver.openOutputStream(targetUri).use { output ->
-                    if (output != null) {
-                        input.copyTo(output)
-                    }
-                }
-            }
-
-            // 원본 비공개 파일 삭제
-            if (file.delete()) {
-                Toast.makeText(ctx, "갤러리로 정상 배출 및 보관함에서 제거됨", Toast.LENGTH_SHORT).show()
-            } else {
-                Toast.makeText(ctx, "갤러리로 내보냈으나 보관함 원본 삭제에 실패했습니다.", Toast.LENGTH_SHORT).show()
-            }
-            
-            loadMediaFiles()
-        } catch (e: Exception) {
-            e.printStackTrace()
-            Toast.makeText(ctx, "내보내기 오류: ${e.message}", Toast.LENGTH_LONG).show()
+        if (!exporting.add(file.absolutePath)) return
+        val ctx = requireContext().applicationContext
+        viewLifecycleOwner.lifecycleScope.launch {
+            try {
+                withContext(Dispatchers.IO) { VideoFiles.exportCopy(ctx, file) }
+                Toast.makeText(ctx, "갤러리에 복사했습니다. 보관함 원본은 유지됩니다", Toast.LENGTH_LONG).show()
+            } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
+                Toast.makeText(ctx, "내보내기 실패: ${e.message}", Toast.LENGTH_LONG).show()
+            } finally { exporting.remove(file.absolutePath) }
         }
     }
 
@@ -223,8 +204,12 @@ class PrivateVaultFragment : Fragment() {
             .setTitle("영구 삭제")
             .setMessage("이 영상/사진을 비공개 보관함에서 완전히 영구 삭제하시겠습니까? 복구할 수 없습니다.")
             .setPositiveButton("삭제") { _, _ ->
+                if (file.absolutePath in RecordingJournal.activePaths || file.absolutePath in exporting) {
+                    Toast.makeText(requireContext(), "사용 중인 파일입니다", Toast.LENGTH_SHORT).show()
+                    return@setPositiveButton
+                }
                 if (file.delete()) {
-                    Toast.makeText(requireContext(), "파일이 안전하게 소거되었습니다.", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(requireContext(), "파일을 삭제했습니다.", Toast.LENGTH_SHORT).show()
                     loadMediaFiles()
                 } else {
                     Toast.makeText(requireContext(), "파일 소거 실패", Toast.LENGTH_SHORT).show()
@@ -235,6 +220,7 @@ class PrivateVaultFragment : Fragment() {
     }
 
     override fun onDestroyView() {
+        if (::adapter.isInitialized) adapter.close()
         super.onDestroyView()
         _binding = null
     }
@@ -243,6 +229,7 @@ class PrivateVaultFragment : Fragment() {
     private class VaultAdapter(
         private val context: Context,
         private val list: List<File>,
+        private val info: Map<String, VideoFiles.Info>,
         private val onItemClick: (File) -> Unit,
         private val onItemLongClick: (File) -> Unit
     ) : RecyclerView.Adapter<VaultAdapter.MediaViewHolder>() {
@@ -268,12 +255,14 @@ class PrivateVaultFragment : Fragment() {
             val file = list[position]
             val path = file.absolutePath
             holder.boundPath = path
-            holder.binding.txtMediaName.text = file.name
+            holder.binding.txtMediaName.text = "${info[path]?.label.orEmpty()}\n${file.name}"
             holder.binding.imgPlayMark.visibility =
                 if (file.name.endsWith(".mp4")) View.VISIBLE else View.GONE
 
             val cached = thumbCache.get(path)
-            if (cached != null) {
+            if (path in RecordingJournal.activePaths) {
+                holder.binding.imgThumbnail.setImageResource(android.R.drawable.ic_media_pause)
+            } else if (cached != null) {
                 holder.binding.imgThumbnail.setImageBitmap(cached)
             } else {
                 holder.binding.imgThumbnail.setImageResource(android.R.drawable.ic_menu_gallery)
@@ -312,6 +301,8 @@ class PrivateVaultFragment : Fragment() {
             e.printStackTrace()
             null
         }
+
+        fun close() { ioExecutor.shutdownNow(); mainHandler.removeCallbacksAndMessages(null); thumbCache.evictAll() }
 
         override fun getItemCount(): Int = list.size
     }

@@ -385,7 +385,7 @@ class CameraFragment : Fragment() {
         val privateDir = File(ctx.getExternalFilesDir(null), "private_vault")
         if (!privateDir.exists()) return
 
-        val files = privateDir.listFiles()?.filter { it.isFile && it.name != ".nomedia" }
+        val files = privateDir.listFiles()?.filter { it.isFile && it.extension == "mp4" && it.length() > 0 && it.absolutePath !in com.example.camera2study.util.RecordingJournal.activePaths }
         if (files.isNullOrEmpty()) {
             binding.imgVaultThumbnail.setImageResource(android.R.drawable.ic_lock_lock)
             binding.imgVaultThumbnail.setPadding(8, 8, 8, 8)
