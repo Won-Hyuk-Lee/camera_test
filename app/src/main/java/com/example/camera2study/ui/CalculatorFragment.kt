@@ -187,6 +187,10 @@ class CalculatorFragment : Fragment() {
     }
 
     private fun openProtectedEntry() {
+        if (!SecurityPrefs.isPinEnabled(requireContext())) {
+            (requireActivity() as com.example.camera2study.MainActivity).unlockEntry()
+            return
+        }
         val fragment = if (SecurityPrefs.isPinEnabled(requireContext())) {
             PinFragment()
         } else {

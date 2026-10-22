@@ -80,9 +80,7 @@ class PinFragment : Fragment() {
 
     private fun checkPin() {
         if (SecurityPrefs.verifyPin(requireContext(), pinBuilder.toString())) {
-            parentFragmentManager.beginTransaction()
-                .replace(R.id.container, HomeFragment())
-                .commit()
+            (requireActivity() as com.example.camera2study.MainActivity).unlockEntry()
         } else {
             pinBuilder.clear()
             updatePinDisplay()
