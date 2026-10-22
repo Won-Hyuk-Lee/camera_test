@@ -40,6 +40,7 @@ class CameraForegroundService : LifecycleService() {
     private var isLongPressTriggered = false
     private var isControllerReady = false
     private var pendingWidgetStart = false
+    private var pendingTest = false
 
     private val volumeReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -113,6 +114,12 @@ class CameraForegroundService : LifecycleService() {
 
         when (intent?.action) {
             ACTION_START_RECORDING -> enterRecordingForeground()
+            ACTION_QUICK_START -> {
+                if (!controller.isRecording()) {
+                    pendingTest = intent.getBooleanExtra("test", false)
+                    requestWidgetRecordingStart()
+                }
+            }
             ACTION_TOGGLE_RECORDING -> {
                 if (controller.isRecording()) {
                     stopBackgroundRecording()
@@ -180,7 +187,9 @@ class CameraForegroundService : LifecycleService() {
         pendingWidgetStart = false
         if (controller.isRecording()) return
 
-        val settings = CameraSettingsStore.load(applicationContext)
+        val stored = CameraSettingsStore.load(applicationContext, quick = true)
+        val settings = if (pendingTest) stored.copy(maxDurationMs = 10_000, maxRepeatCount = 1, totalDurationMs = 0) else stored
+        pendingTest = false
         CameraSettingsStore.applyToController(controller, settings)
         controller.resetRepeatCount()
         startBackgroundRecording()
@@ -294,6 +303,7 @@ class CameraForegroundService : LifecycleService() {
     companion object {
         const val NOTI_ID = 1001
         const val CHANNEL_ID = "background_sync_channel"
+        const val ACTION_QUICK_START = "com.example.camera2study.ACTION_QUICK_START"
         const val ACTION_START_RECORDING = "com.example.camera2study.ACTION_START_RECORDING"
         const val ACTION_STOP_RECORDING = "com.example.camera2study.ACTION_STOP_RECORDING"
         const val ACTION_TOGGLE_RECORDING = "com.example.camera2study.ACTION_TOGGLE_RECORDING"
@@ -304,6 +314,14 @@ class CameraForegroundService : LifecycleService() {
         /**
          * 녹화 시작 직전에만 호출한다. service를 foreground 상태로 격상시킨다.
          */
+        fun requestQuickRecording(context: Context, test: Boolean = false) {
+            val intent = Intent(context, CameraForegroundService::class.java).apply {
+                action = ACTION_QUICK_START
+                putExtra("test", test)
+            }
+            androidx.core.content.ContextCompat.startForegroundService(context, intent)
+        }
+
         fun requestStartRecording(context: Context) {
             val intent = Intent(context, CameraForegroundService::class.java).apply {
                 action = ACTION_START_RECORDING

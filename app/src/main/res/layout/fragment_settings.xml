@@ -54,6 +54,12 @@
             android:orientation="vertical">
 
             <!-- 섹션 1: 배터리 최적화 -->
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnQuickRecordingSettings"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="빠른 녹화 전용 설정" />
+
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"

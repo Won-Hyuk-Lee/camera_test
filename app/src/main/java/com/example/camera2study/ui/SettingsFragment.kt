@@ -76,6 +76,11 @@ class SettingsFragment : Fragment() {
             }
         }
 
+        binding.btnQuickRecordingSettings.setOnClickListener {
+            parentFragmentManager.beginTransaction()
+                .replace(com.example.camera2study.R.id.container, RecordingSettingsFragment.create(true))
+                .addToBackStack(null).commit()
+        }
         setupPinControls()
     }
 

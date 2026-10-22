@@ -146,6 +146,12 @@ class CameraController(private val context: Context) {
             }
         }
 
+    var audioEnabled: Boolean = true
+    var orientationMode: String = "AUTO"
+    var mirrorFront: Boolean = false
+    var exposureEv: Float = 0f
+    var selectedCameraId: String? = null
+
     var isPrivateSave: Boolean = true // 기본 비공개 보관함 저장
 
     // 타이머 핸들러 (최대 녹화 시간 제어용)
@@ -654,7 +660,7 @@ class CameraController(private val context: Context) {
             isAutoStopping = false
             isRecordingPaused = false
             totalPausedMs = 0L
-            prep.withAudioEnabled()
+            if (audioEnabled) prep.withAudioEnabled()
             recording = prep.start(ContextCompat.getMainExecutor(context)) { event ->
                 if (token != recordingToken) return@start
                 segmentDurationMs = event.recordingStats.recordedDurationNanos / 1_000_000L

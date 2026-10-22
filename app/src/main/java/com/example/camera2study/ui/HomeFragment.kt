@@ -44,12 +44,8 @@ class HomeFragment : Fragment() {
 
         binding.cardFastRecord.setOnClickListener {
             if (PermissionHelper.allGranted(requireContext())) {
-                val fragment = CameraFragment().apply {
-                    arguments = Bundle().apply {
-                        putBoolean("EXTRA_AUTO_START", true)
-                    }
-                }
-                navigateTo(fragment)
+                com.example.camera2study.CameraForegroundService.requestQuickRecording(requireContext())
+                Toast.makeText(requireContext(), "빠른 녹화를 요청했습니다. 알림에서 상태를 확인하세요", Toast.LENGTH_LONG).show()
             } else {
                 Toast.makeText(
                     requireContext(),

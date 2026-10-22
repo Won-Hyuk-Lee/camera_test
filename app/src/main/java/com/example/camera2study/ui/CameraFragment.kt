@@ -417,85 +417,9 @@ class CameraFragment : Fragment() {
     }
 
     private fun openSettings() {
-        if (!::controller.isInitialized) return
-        val activeId = controller.activeCameraId() ?: return
-        val ctx = requireContext()
-        val exposureRange = CameraUtils.getExposureTimeRangeNs(ctx, activeId)
-        val apertures = CameraUtils.getApertures(ctx, activeId)
-        val variableAperture = CameraUtils.hasVariableAperture(ctx, activeId)
-
-        val sheet = SettingsBottomSheet.create(
-            exposureRangeNs = exposureRange,
-            apertures = apertures,
-            variableAperture = variableAperture,
-            currentQuality = controller.videoQuality,
-            currentMaxDurationMs = controller.maxDurationMs,
-            currentMaxRepeatCount = controller.maxRepeatCount,
-            currentFps = controller.targetFps,
-            currentHdr = controller.isHdrEnabled,
-            currentProMode = controller.isProMode,
-            currentAwbMode = controller.getAwbMode(),
-            currentColorTempK = manualColorTempK,
-            currentExposureTimeNs = controller.getExposureTime(),
-            currentAperture = controller.getAperture(),
-            callbacks = object : SettingsBottomSheet.Callbacks {
-                override fun onAwbMode(mode: Int) {
-                    controller.setAwbMode(mode)
-                    saveCameraSettings()
-                }
-
-                override fun onColorTemperature(kelvin: Int) {
-                    manualColorTempK = kelvin
-                    saveCameraSettings()
-                }
-
-                override fun onWbGains(gains: FloatArray?) {
-                    controller.setManualWbGains(gains)
-                    saveCameraSettings()
-                }
-
-                override fun onExposureTime(ns: Long?) {
-                    controller.setExposureTime(ns)
-                    saveCameraSettings()
-                }
-
-                override fun onAperture(v: Float?) {
-                    controller.setAperture(v)
-                    saveCameraSettings()
-                }
-
-                override fun onQuality(quality: Quality) {
-                    controller.videoQuality = quality
-                    saveCameraSettings()
-                }
-
-                override fun onMaxDuration(ms: Long) {
-                    controller.maxDurationMs = ms
-                    saveCameraSettings()
-                }
-
-                override fun onMaxRepeatCount(count: Int) {
-                    controller.maxRepeatCount = count
-                    saveCameraSettings()
-                }
-
-                override fun onFps(fps: Int) {
-                    controller.targetFps = fps
-                    saveCameraSettings()
-                }
-
-                override fun onHdr(enabled: Boolean) {
-                    controller.isHdrEnabled = enabled
-                    saveCameraSettings()
-                }
-
-                override fun onProMode(enabled: Boolean) {
-                    controller.isProMode = enabled
-                    saveCameraSettings()
-                }
-            }
-        )
-        sheet.show(parentFragmentManager, "settings")
+        if (!::controller.isInitialized || controller.isRecording()) return
+        saveCameraSettings()
+        navigateTo(RecordingSettingsFragment.create(false))
     }
 
     private fun syncRecordingUi(isRecording: Boolean) {

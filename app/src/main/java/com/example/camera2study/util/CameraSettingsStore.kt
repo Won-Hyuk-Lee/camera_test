@@ -31,7 +31,13 @@ object CameraSettingsStore {
         val lensFacingBack: Boolean = true,
         val zoomRatio: Float = 1.0f,
         val zoomModeRatio: Float = 1.0f,
-        val ratioMode: Int = CameraController.RATIO_3_4,
+        val ratioMode: Int = CameraController.RATIO_16_9,
+        val cameraId: String? = null,
+        val exposureEv: Float = 0f,
+        val audioEnabled: Boolean = true,
+        val privateSave: Boolean = true,
+        val orientation: String = "AUTO",
+        val mirrorFront: Boolean = false,
         val quality: Quality = Quality.HD,
         val maxDurationMs: Long = 1_800_000L,
         val maxRepeatCount: Int = 0,
@@ -45,15 +51,21 @@ object CameraSettingsStore {
         val aperture: Float? = null
     )
 
-    fun load(context: Context): CameraSettings {
-        val pref = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+    fun load(context: Context, quick: Boolean = false): CameraSettings {
+        val pref = context.getSharedPreferences(if (quick) "quick_recording_pref" else PREF_NAME, Context.MODE_PRIVATE)
         val exposureTime = pref.getLong(KEY_EXPOSURE_TIME_NS, NO_EXPOSURE_TIME)
         val aperture = pref.getFloat(KEY_APERTURE, NO_APERTURE)
         return CameraSettings(
+            cameraId = pref.getString("camera_id", null),
+            exposureEv = pref.getFloat("exposure_ev", 0f),
+            audioEnabled = pref.getBoolean("audio_enabled", true),
+            privateSave = pref.getBoolean("private_save", true),
+            orientation = pref.getString("orientation", "AUTO") ?: "AUTO",
+            mirrorFront = pref.getBoolean("mirror_front", false),
             lensFacingBack = pref.getBoolean(KEY_LENS_FACING_BACK, true),
             zoomRatio = pref.getFloat(KEY_ZOOM_RATIO, 1.0f),
             zoomModeRatio = pref.getFloat(KEY_ZOOM_MODE, 1.0f),
-            ratioMode = pref.getInt(KEY_RATIO_MODE, CameraController.RATIO_3_4),
+            ratioMode = pref.getInt(KEY_RATIO_MODE, CameraController.RATIO_16_9),
             quality = qualityFromName(pref.getString(KEY_QUALITY, null)),
             maxDurationMs = pref.getLong(KEY_MAX_DURATION_MS, 0L).takeIf { it > 0 } ?: 1_800_000L,
             maxRepeatCount = if (pref.getLong(KEY_MAX_DURATION_MS, 0L) == 0L) 0 else pref.getInt(KEY_MAX_REPEAT_COUNT, 0).takeIf { it in 0..998 } ?: 0,
@@ -68,9 +80,15 @@ object CameraSettingsStore {
         )
     }
 
-    fun save(context: Context, settings: CameraSettings) {
-        context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+    fun save(context: Context, settings: CameraSettings, quick: Boolean = false) {
+        context.getSharedPreferences(if (quick) "quick_recording_pref" else PREF_NAME, Context.MODE_PRIVATE)
             .edit()
+            .putString("camera_id", settings.cameraId)
+            .putFloat("exposure_ev", settings.exposureEv)
+            .putBoolean("audio_enabled", settings.audioEnabled)
+            .putBoolean("private_save", settings.privateSave)
+            .putString("orientation", settings.orientation)
+            .putBoolean("mirror_front", settings.mirrorFront)
             .putBoolean(KEY_LENS_FACING_BACK, settings.lensFacingBack)
             .putFloat(KEY_ZOOM_RATIO, settings.zoomRatio)
             .putFloat(KEY_ZOOM_MODE, settings.zoomModeRatio)
@@ -92,6 +110,12 @@ object CameraSettingsStore {
     fun snapshot(context: Context, controller: CameraController, colorTempK: Int): CameraSettings {
         val existing = load(context)
         return CameraSettings(
+            cameraId = controller.selectedCameraId,
+            exposureEv = controller.exposureEv,
+            audioEnabled = controller.audioEnabled,
+            privateSave = controller.isPrivateSave,
+            orientation = controller.orientationMode,
+            mirrorFront = controller.mirrorFront,
             lensFacingBack = controller.isFacingBack(),
             zoomRatio = controller.zoomRatio,
             zoomModeRatio = controller.selectedZoomModeRatio,
@@ -111,6 +135,11 @@ object CameraSettingsStore {
     }
 
     fun applyToController(controller: CameraController, settings: CameraSettings) = controller.configure {
+        controller.audioEnabled = settings.audioEnabled
+        controller.isPrivateSave = settings.privateSave
+        controller.orientationMode = settings.orientation
+        controller.mirrorFront = settings.mirrorFront
+        controller.exposureEv = settings.exposureEv
         controller.videoQuality = settings.quality
         controller.maxDurationMs = settings.maxDurationMs
         controller.maxRepeatCount = settings.maxRepeatCount
@@ -141,6 +170,7 @@ object CameraSettingsStore {
             controller.setZoomRatio(settings.zoomRatio)
         }
 
+        controller.selectedCameraId = settings.cameraId
         controller.currentRatioMode = settings.ratioMode
     }
 
