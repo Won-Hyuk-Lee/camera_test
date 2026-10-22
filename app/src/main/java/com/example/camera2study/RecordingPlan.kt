@@ -6,5 +6,5 @@ data class RecordingPlan(val segmentMs: Long, val maxFiles: Int = 0, val totalMs
     fun nextDuration(recordedMs: Long): Long = if (totalMs == 0L) segmentMs
         else minOf(segmentMs, (totalMs - recordedMs).coerceAtLeast(0L))
     fun continues(completedFiles: Int, recordedMs: Long): Boolean =
-        (maxFiles == 0 || completedFiles < maxFiles) && (totalMs == 0L || recordedMs < totalMs - 100L)
+        (maxFiles == 0 || completedFiles < maxFiles) && (totalMs == 0L || totalMs - recordedMs >= 1_000L)
 }

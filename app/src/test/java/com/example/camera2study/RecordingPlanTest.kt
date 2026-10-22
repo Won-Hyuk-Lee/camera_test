@@ -24,4 +24,10 @@ class RecordingPlanTest {
         assertFalse(RecordingPlan(10_000, 2, 60_000).continues(2, 20_000))
         assertFalse(RecordingPlan(10_000, 8, 20_000).continues(2, 20_000))
     }
+    @Test fun encoderRoundingDoesNotCreateAnUnplayableThirdFile() {
+        val plan = RecordingPlan(10_000, totalMs = 20_000)
+        assertTrue(plan.continues(1, 9_927))
+        assertFalse(plan.continues(2, 19_866))
+        assertTrue(plan.continues(2, 19_000))
+    }
 }

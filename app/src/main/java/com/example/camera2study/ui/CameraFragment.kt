@@ -430,7 +430,7 @@ class CameraFragment : Fragment() {
             binding.shutterCenter.startAnimation(animation)
         } else {
             binding.txtTimer.removeCallbacks(timerRunnable)
-            binding.txtTimer.text = "00:00"
+            binding.txtTimer.text = formatElapsed(controller.recordingState.durationMs) + " · " + controller.recordingState.message
             binding.btnPauseResume.visibility = View.GONE
             binding.shutterCenter.clearAnimation()
 

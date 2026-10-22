@@ -311,6 +311,7 @@ class CameraController(private val context: Context) {
     }
 
     private fun applyOptionsLive() {
+        if (configuring || released) return
         val cam = camera ?: return
         val control = Camera2CameraControl.from(cam.cameraControl)
         val builder = CaptureRequestOptions.Builder()
@@ -568,6 +569,7 @@ class CameraController(private val context: Context) {
     }
 
     private var session: org.json.JSONObject? = null
+    private var sessionFinished = true
     private var segmentEntry: org.json.JSONObject? = null
     private var sessionDurationMs = 0L
     private var sessionBytes = 0L
@@ -588,7 +590,8 @@ class CameraController(private val context: Context) {
     private fun publish(phase: RecordingPhase, message: String) {
         if (recordingState.phase != phase) phaseSince = android.os.SystemClock.elapsedRealtime()
         RecordingRuntime.state.value = RecordingState(phase, session?.optString("id").orEmpty(),
-            currentRepeatCount + 1, sessionDurationMs + segmentDurationMs, sessionBytes + segmentBytes,
+            if (phase == RecordingPhase.COMPLETED || phase == RecordingPhase.ERROR) session?.optJSONArray("segments")?.length() ?: 0 else currentRepeatCount + 1,
+            sessionDurationMs + segmentDurationMs, sessionBytes + segmentBytes,
             message, segmentEntry?.optString("path").orEmpty())
     }
 
@@ -612,6 +615,7 @@ class CameraController(private val context: Context) {
                 }
                 RecordingPhase.FINALIZING -> if (now - phaseSince > 15_000L) {
                     failure = failure ?: "파일 저장 완료를 확인하지 못했습니다"
+                    stopReason = "finalize_timeout"
                     recording?.close()
                     recording = null
                     finishSession()
@@ -628,7 +632,11 @@ class CameraController(private val context: Context) {
     fun startRecording(source: String = "app") {
         if (released || isRecording()) return
         session = com.example.camera2study.util.RecordingJournal.begin(context, source,
-            "camera=${activeCameraId()}, zoom=$zoomRatio, quality=$videoQuality, fps=$targetFps, hdr=$isHdrEnabled")
+            "camera=${activeCameraId()}, zoom=$zoomRatio, quality=$videoQuality, fps=$targetFps, hdr=$isHdrEnabled, ev=$exposureEv, audio=$audioEnabled, orientation=$orientationMode, mirror=$mirrorFront")
+        sessionFinished = false
+        segmentEntry = null
+        segmentDurationMs = 0
+        segmentBytes = 0
         failure = null
         stopReason = "user"
         stopRequested = false
@@ -639,6 +647,7 @@ class CameraController(private val context: Context) {
         val problem = com.example.camera2study.util.CaptureHealth.problem(context, audioEnabled, true)
         if (problem != null || (!isPrivateSave && android.os.Build.VERSION.SDK_INT < 29)) {
             failure = problem ?: "공개 갤러리 저장은 Android 10 이상에서 지원합니다"
+            stopReason = "preflight_error"
             finishSession()
             return
         }
@@ -661,6 +670,7 @@ class CameraController(private val context: Context) {
         val vc = videoCapture
         if (vc == null) {
             failure = lastError ?: "카메라가 준비되지 않았습니다"
+            stopReason = "configuration_error"
             finishSession()
             return
         }
@@ -693,10 +703,11 @@ class CameraController(private val context: Context) {
             if (audioEnabled) prep.withAudioEnabled()
             recording = prep.start(ContextCompat.getMainExecutor(context)) { event ->
                 if (token != recordingToken) return@start
+                val previousDuration = segmentDurationMs
                 segmentDurationMs = event.recordingStats.recordedDurationNanos / 1_000_000L
                 val previousBytes = segmentBytes
                 segmentBytes = event.recordingStats.numBytesRecorded
-                if (segmentBytes > previousBytes) lastProgressAt = android.os.SystemClock.elapsedRealtime()
+                if (segmentBytes > previousBytes && segmentDurationMs > previousDuration) lastProgressAt = android.os.SystemClock.elapsedRealtime()
                 when (event) {
                     is VideoRecordEvent.Start -> {
                         recordingStartElapsedMs = android.os.SystemClock.elapsedRealtime()
@@ -746,6 +757,9 @@ class CameraController(private val context: Context) {
                             publish(RecordingPhase.BETWEEN_SEGMENTS, "다음 파일 준비 중")
                             mainHandler.postDelayed(restartRunnable, 100L)
                         } else {
+                            if (failure != null && !stopRequested) stopReason = "recording_error"
+                            else if (isAutoStopping && !stopRequested) stopReason =
+                                if (sessionPlan.maxFiles > 0 && currentRepeatCount >= sessionPlan.maxFiles) "file_limit" else "time_limit"
                             finishSession()
                         }
                     }
@@ -754,6 +768,7 @@ class CameraController(private val context: Context) {
             }
         } catch (e: Exception) {
             failure = "녹화 시작 실패: ${e.message}"
+            stopReason = "start_error"
             segmentEntry?.let { com.example.camera2study.util.RecordingJournal.finishSegment(context,
                 journal, it, 0, 0, failure, "") }
             finishSession()
@@ -761,6 +776,10 @@ class CameraController(private val context: Context) {
     }
 
     private fun finishSession() {
+        if (sessionFinished) return
+        sessionFinished = true
+        // Late callbacks from a closed/timed-out recorder must not alter a later session.
+        recordingToken++
         mainHandler.removeCallbacks(autoStopRunnable)
         mainHandler.removeCallbacks(restartRunnable)
         mainHandler.removeCallbacks(healthCheck)
