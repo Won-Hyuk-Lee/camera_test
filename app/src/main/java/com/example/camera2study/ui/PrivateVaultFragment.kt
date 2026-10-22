@@ -88,6 +88,7 @@ class PrivateVaultFragment : Fragment() {
                 if (!privateDir.exists()) privateDir.mkdirs()
                 val files = privateDir.listFiles()
                     ?.filter { it.isFile && (it.name.endsWith(".jpg") || it.name.endsWith(".mp4")) }
+                    ?.filter { file -> arguments?.getString("sessionId")?.let { file.name.contains(it) } ?: true }
                     ?.sortedByDescending { it.lastModified() }
                     .orEmpty()
                 files.map { it to VideoFiles.inspect(it) }

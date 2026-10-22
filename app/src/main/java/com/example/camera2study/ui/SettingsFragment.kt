@@ -81,6 +81,10 @@ class SettingsFragment : Fragment() {
                 .replace(com.example.camera2study.R.id.container, RecordingSettingsFragment.create(true))
                 .addToBackStack(null).commit()
         }
+        binding.btnRecordingHistory.setOnClickListener {
+            parentFragmentManager.beginTransaction().replace(com.example.camera2study.R.id.container, RecordingHistoryFragment())
+                .addToBackStack(null).commit()
+        }
         setupPinControls()
     }
 
@@ -131,12 +135,12 @@ class SettingsFragment : Fragment() {
         val isIgnoring = pm.isIgnoringBatteryOptimizations(ctx.packageName)
 
         if (isIgnoring) {
-            binding.txtBatteryState.text = "최적화 안 함 (제한 없음 - 안전)"
+            binding.txtBatteryState.text = "배터리 최적화 예외 적용"
             binding.txtBatteryState.setTextColor(Color.parseColor("#4CAF50"))
             binding.btnGoBatterySettings.isEnabled = false
             binding.btnGoBatterySettings.text = "🔋 배터리 최적화 정상 해제됨"
         } else {
-            binding.txtBatteryState.text = "최적화 중 (제한됨 - 불안정)"
+            binding.txtBatteryState.text = "배터리 최적화 적용 중"
             binding.txtBatteryState.setTextColor(Color.parseColor("#FF5252"))
             binding.btnGoBatterySettings.isEnabled = true
             binding.btnGoBatterySettings.text = "🔋 배터리 설정 화면으로 이동"
@@ -158,7 +162,7 @@ class SettingsFragment : Fragment() {
         binding.txtPermNotification.setTextColor(Color.parseColor("#FFC107"))
 
         // 전체 획득 상태이면 버튼 비활성화
-        if (PermissionHelper.allGranted(ctx)) {
+        if (PermissionHelper.REQUIRED_PERMISSIONS.all { ContextCompat.checkSelfPermission(ctx, it) == PackageManager.PERMISSION_GRANTED }) {
             binding.btnRequestPermissions.isEnabled = false
             binding.btnRequestPermissions.text = "🔑 모든 필수 권한 획득 완료"
         } else {
@@ -180,7 +184,7 @@ class SettingsFragment : Fragment() {
     private fun showBatteryGuideAndGo() {
         MaterialAlertDialogBuilder(requireContext())
             .setTitle("🔋 배터리 최적화 예외 가이드")
-            .setMessage("백그라운드에서 화면이 꺼졌을 때 중단 없이 무중단 녹화를 유지하려면 배터리 최적화 해제(제한 없음)가 필수적입니다.\n\n[이동 후 가이드]\n1. 목록 상단의 필터를 '최적화하지 않은 앱'에서 '전체'로 변경합니다.\n2. 'test' 앱을 검색해 찾습니다.\n3. 해당 앱을 선택하고 '최적화하지 않음' 또는 '제한 없음'으로 설정해 주세요.")
+            .setMessage("배터리 최적화 예외는 백그라운드 녹화에 도움이 됩니다. 과열·권한·저장공간 등의 중단까지 방지하지는 않습니다.\n\n[이동 후 가이드]\n1. 목록 상단의 필터를 '최적화하지 않은 앱'에서 '전체'로 변경합니다.\n2. '계산기' 앱을 검색해 찾습니다.\n3. 해당 앱을 선택하고 '최적화하지 않음' 또는 '제한 없음'으로 설정해 주세요.")
             .setPositiveButton("이동하기") { _, _ ->
                 try {
                     val intent = Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)

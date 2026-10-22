@@ -37,6 +37,7 @@ class RecordingSettingsFragment : Fragment() {
         val ctx = requireContext()
         val content = LinearLayout(ctx).apply {
             orientation = LinearLayout.VERTICAL
+            setBackgroundColor(android.graphics.Color.rgb(18, 20, 25))
             setPadding(24, 24, 24, 32)
         }
         list = content
@@ -54,7 +55,7 @@ class RecordingSettingsFragment : Fragment() {
     }
 
     private fun label(text: String) = TextView(requireContext()).also {
-        it.text = text; it.textSize = 16f; it.setPadding(0, 20, 0, 8); list?.addView(it)
+        it.text = text; it.setTextColor(android.graphics.Color.WHITE); it.textSize = 16f; it.setPadding(0, 20, 0, 8); list?.addView(it)
     }
     private fun button(text: String, action: () -> Unit) = Button(requireContext()).also {
         it.text = text; it.setOnClickListener { action() }; list?.addView(it)
@@ -63,19 +64,29 @@ class RecordingSettingsFragment : Fragment() {
         label(title)
         val spinner = Spinner(requireContext())
         spinner.contentDescription = title
-        spinner.adapter = ArrayAdapter(requireContext(), android.R.layout.simple_spinner_dropdown_item, options.map { it.first })
+        spinner.adapter = object : ArrayAdapter<String>(requireContext(), android.R.layout.simple_spinner_dropdown_item, options.map { it.first }) {
+            override fun getView(position: Int, convertView: View?, parent: ViewGroup): View =
+                super.getView(position, convertView, parent).also { (it as TextView).setTextColor(android.graphics.Color.WHITE) }
+            override fun getDropDownView(position: Int, convertView: View?, parent: ViewGroup): View =
+                super.getDropDownView(position, convertView, parent).also {
+                    (it as TextView).setTextColor(android.graphics.Color.WHITE)
+                    it.setBackgroundColor(android.graphics.Color.rgb(30, 32, 38))
+                    it.minimumHeight = (48 * resources.displayMetrics.density).toInt()
+                }
+        }
         spinner.setSelection(options.indexOfFirst { it.second == selected }.coerceAtLeast(0), false)
         list?.addView(spinner)
+        var lastSelection = selected
         spinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
             override fun onNothingSelected(parent: AdapterView<*>?) = Unit
             override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
                 val value = options[position].second
-                if (value != selected) change(value)
+                if (value != lastSelection) { lastSelection = value; change(value) }
             }
         }
     }
     private fun toggle(title: String, checked: Boolean, change: (Boolean) -> Unit) {
-        val check = CheckBox(requireContext()).apply { text = title; isChecked = checked }
+        val check = CheckBox(requireContext()).apply { text = title; setTextColor(android.graphics.Color.WHITE); isChecked = checked }
         check.setOnCheckedChangeListener { _, value -> change(value) }
         list?.addView(check)
     }
