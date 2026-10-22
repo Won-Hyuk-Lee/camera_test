@@ -47,6 +47,7 @@ class CameraFragment : Fragment() {
     private var pauseStartMs: Long = 0L
     private val timerRunnable = object : Runnable {
         override fun run() {
+            val binding = _binding ?: return
             if (!::controller.isInitialized) return
             val elapsed = SystemClock.elapsedRealtime() - recordStartMs
             val repeatStr = if (controller.maxRepeatCount > 1) {
@@ -59,6 +60,7 @@ class CameraFragment : Fragment() {
 
     private val serviceConnection = object : android.content.ServiceConnection {
         override fun onServiceConnected(name: android.content.ComponentName?, binder: android.os.IBinder?) {
+            if (_binding == null) return
             val localBinder = binder as CameraForegroundService.LocalBinder
             service = localBinder.service()
             controller = service!!.controller
@@ -68,9 +70,14 @@ class CameraFragment : Fragment() {
             controller.onCameraChanged = { id -> updateLensIndicator(id) }
             controller.onRecordingEvent = { event -> handleRecordEvent(event) }
             controller.onZoomChanged = { current, max -> updateZoomUi(current, max) }
+            controller.onError = { message ->
+                context?.let { Toast.makeText(it, message, Toast.LENGTH_LONG).show() }
+            }
 
             // 프리뷰 뷰 부착
-            controller.attachPreview(binding.previewView)
+            if (viewLifecycleOwner.lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.STARTED)) {
+                controller.attachPreview(binding.previewView)
+            }
 
             // UI 및 리스너 설정
             setupZoomListeners()
@@ -86,14 +93,8 @@ class CameraFragment : Fragment() {
             val autoStart = arguments?.getBoolean("EXTRA_AUTO_START", false) ?: false
             if (autoStart) {
                 setVideoModeUi()
-                // 0.5초 대기 후 레코딩 시작 (초기화 안정성 확보)
-                Handler(Looper.getMainLooper()).postDelayed({
-                    if (::controller.isInitialized && !controller.isRecording()) {
-                        controller.resetRepeatCount()
-                        CameraForegroundService.requestStartRecording(requireContext())
-                        controller.startRecording()
-                    }
-                }, 500L)
+                arguments?.putBoolean("EXTRA_AUTO_START", false)
+                service?.startFromUi()
             } else {
                 // 서비스의 동영상 상태 복원
                 if (controller.isRecording()) {
@@ -129,7 +130,7 @@ class CameraFragment : Fragment() {
         // 이렇게 하면 카메라 화면을 닫을 때 (unbind) service가 자동으로 정리된다.
         val ctx = requireContext()
         val intent = android.content.Intent(ctx, CameraForegroundService::class.java)
-        ctx.bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE)
+        isBound = ctx.bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE)
 
         binding.btnSwitchFacing.setOnClickListener {
             if (::controller.isInitialized) {
@@ -171,9 +172,7 @@ class CameraFragment : Fragment() {
         if (controller.isRecording()) {
             controller.stopRecording()
         } else {
-            controller.resetRepeatCount()
-            CameraForegroundService.requestStartRecording(requireContext())
-            controller.startRecording()
+            service?.startFromUi()
         }
     }
 
@@ -184,6 +183,7 @@ class CameraFragment : Fragment() {
     }
 
     private fun updateLensIndicator(cameraId: String?) {
+        val binding = _binding ?: return
         if (cameraId == null || !::controller.isInitialized) {
             binding.txtLensInfo.text = ""
             return
@@ -236,6 +236,7 @@ class CameraFragment : Fragment() {
     }
 
     private fun updateZoomUi(current: Float, max: Float) {
+        val binding = _binding ?: return
         if (!isAdded) return
         binding.sliderZoom.valueTo = max
         binding.sliderZoom.value = current.coerceIn(binding.sliderZoom.valueFrom, max)
@@ -490,6 +491,7 @@ class CameraFragment : Fragment() {
     }
 
     private fun syncRecordingUi(isRecording: Boolean) {
+        val binding = _binding ?: return
         if (isRecording) {
             recordStartMs = SystemClock.elapsedRealtime()
             binding.txtTimer.post(timerRunnable)
@@ -524,6 +526,7 @@ class CameraFragment : Fragment() {
     }
 
     private fun handleRecordEvent(event: VideoRecordEvent) {
+        val binding = _binding ?: return
         when (event) {
             is VideoRecordEvent.Start -> {
                 syncRecordingUi(true)
@@ -586,11 +589,21 @@ class CameraFragment : Fragment() {
     }
 
     private fun restoreCameraSettings() {
-        if (!::controller.isInitialized) return
+        if (!::controller.isInitialized || controller.isRecording()) return
         val settings = CameraSettingsStore.load(requireContext())
         manualColorTempK = settings.colorTempK
         CameraSettingsStore.applyToController(controller, settings)
         updateRatioSelection(settings.ratioMode)
+    }
+
+    override fun onStart() {
+        super.onStart()
+        if (::controller.isInitialized && _binding != null) controller.attachPreview(binding.previewView)
+    }
+
+    override fun onStop() {
+        if (::controller.isInitialized) controller.detachPreview()
+        super.onStop()
     }
 
     override fun onDestroyView() {
@@ -601,6 +614,10 @@ class CameraFragment : Fragment() {
         val notRecording = !::controller.isInitialized || !controller.isRecording()
 
         if (::controller.isInitialized) {
+            controller.onRecordingEvent = null
+            controller.onCameraChanged = null
+            controller.onZoomChanged = null
+            controller.onError = null
             controller.detachPreview()
         }
 

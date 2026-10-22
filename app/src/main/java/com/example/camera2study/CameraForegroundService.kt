@@ -151,6 +151,17 @@ class CameraForegroundService : LifecycleService() {
         super.onDestroy()
     }
 
+    fun startFromUi() {
+        if (controller.isRecording()) return
+        enterRecordingForeground()
+        if (!isControllerReady) {
+            pendingWidgetStart = true
+            return
+        }
+        controller.resetRepeatCount()
+        startBackgroundRecording()
+    }
+
     fun startBackgroundRecording() {
         isLongPressTriggered = false
         firstVolumeEventTime = 0L

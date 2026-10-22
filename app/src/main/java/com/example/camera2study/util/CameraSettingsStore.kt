@@ -106,7 +106,7 @@ object CameraSettingsStore {
         ).copy(colorTempK = colorTempK.takeIf { it in 3000..8000 } ?: existing.colorTempK)
     }
 
-    fun applyToController(controller: CameraController, settings: CameraSettings) {
+    fun applyToController(controller: CameraController, settings: CameraSettings) = controller.configure {
         controller.videoQuality = settings.quality
         controller.maxDurationMs = settings.maxDurationMs
         controller.maxRepeatCount = settings.maxRepeatCount

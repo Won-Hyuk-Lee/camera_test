@@ -48,6 +48,19 @@ class CameraController(private val context: Context) {
         private const val WAKE_LOCK_GRACE_MS = 60 * 1000L
     }
 
+    private var released = false
+    private var configuring = false
+    var lastError: String? = null
+        private set
+    var onError: ((String) -> Unit)? = null
+
+    fun configure(block: () -> Unit) {
+        if (isRecording()) return
+        configuring = true
+        try { block() } finally { configuring = false }
+        bindUseCases()
+    }
+
     private var cameraProvider: ProcessCameraProvider? = null
     private var camera: Camera? = null
     private var wakeLock: PowerManager.WakeLock? = null
@@ -162,35 +175,60 @@ class CameraController(private val context: Context) {
         lifecycleOwner = owner
         val future = ProcessCameraProvider.getInstance(context)
         future.addListener({
-            cameraProvider = future.get()
-            bindUseCases()
-            onReady()
+            if (released) return@addListener
+            try {
+                cameraProvider = future.get()
+                bindUseCases()
+                onReady()
+            } catch (e: Exception) {
+                reportError("카메라 준비 실패: ${e.message}")
+            }
         }, ContextCompat.getMainExecutor(context))
     }
 
     fun attachPreview(view: PreviewView) {
+        if (released) return
         previewView = view
-        previewUseCase?.setSurfaceProvider(view.surfaceProvider)
-        updateZoomBounds()
+        val provider = cameraProvider ?: return
+        val owner = lifecycleOwner ?: return
+        val video = videoCapture ?: return
+        if (previewUseCase != null) {
+            previewUseCase?.setSurfaceProvider(view.surfaceProvider)
+            return
+        }
+        try {
+            val preview = Preview.Builder().setTargetRotation(view.display?.rotation ?: 0).build()
+            preview.setSurfaceProvider(view.surfaceProvider)
+            camera = provider.bindToLifecycle(owner, buildSelector(), video, preview)
+            previewUseCase = preview
+            updateZoomBounds()
+        } catch (e: Exception) {
+            reportError("미리보기 연결 실패: ${e.message}")
+        }
     }
 
     fun detachPreview() {
-        // 녹화 중에는 surface provider를 null로 만들지 않는다.
-        // null로 만들면 백그라운드/화면 꺼짐 상태에서 CameraX 세션이 흔들려
-        // 정지 프레임 파일이 저장되는 freeze 문제가 발생한다.
-        if (!isRecording()) {
-            previewUseCase?.setSurfaceProvider(null)
-        }
         previewView = null
+        // VideoCapture remains bound to the service; only the UI use case is removed.
+        previewUseCase?.let { cameraProvider?.unbind(it) }
+        previewUseCase = null
+    }
+
+    fun reportError(message: String) {
+        lastError = message
+        onError?.invoke(message)
     }
 
     private fun bindUseCases() {
         val provider = cameraProvider ?: return
         val owner = lifecycleOwner ?: return
 
-        if (isRecording()) return
+        if (isRecording() || configuring || released) return
 
         provider.unbindAll()
+        camera = null
+        videoCapture = null
+        previewUseCase = null
 
         // 1. 화면 비율 결정 — 3:4는 4:3 sensor, 16:9 / Full은 16:9 sensor 출력으로 통일한다.
         // Full은 디스플레이 비율로 preview를 채우되 저장 결과는 16:9로 둬 Galaxy 기본 동작과 일치시킨다.
@@ -220,7 +258,6 @@ class CameraController(private val context: Context) {
             e.printStackTrace()
         }
         val preview = previewBuilder.build()
-        previewUseCase = preview
 
         previewView?.let {
             preview.setSurfaceProvider(it.surfaceProvider)
@@ -246,7 +283,13 @@ class CameraController(private val context: Context) {
 
         val selector = buildSelector()
         try {
-            camera = provider.bindToLifecycle(owner, selector, preview, videoUseCase)
+            camera = if (previewView?.isAttachedToWindow == true) {
+                previewUseCase = preview
+                provider.bindToLifecycle(owner, selector, preview, videoUseCase)
+            } else {
+                provider.bindToLifecycle(owner, selector, videoUseCase)
+            }
+            lastError = null
             videoCapture = videoUseCase
 
             applyOptionsLive()
@@ -256,7 +299,7 @@ class CameraController(private val context: Context) {
             val activeId = camera?.let { Camera2CameraInfo.from(it.cameraInfo).cameraId }
             onCameraChanged?.invoke(activeId)
         } catch (e: Exception) {
-            e.printStackTrace()
+            reportError("촬영 설정 적용 실패: ${e.message}")
         }
     }
 
@@ -500,8 +543,12 @@ class CameraController(private val context: Context) {
     // --- 동영상 녹화 (Start Recording) ---
     @SuppressLint("MissingPermission", "InvalidWakeLockTag")
     fun startRecording() {
-        val vc = videoCapture ?: return
-        if (recording != null) return
+        if (released || recording != null) return
+        val vc = videoCapture ?: run {
+            reportError(lastError ?: "카메라가 준비되지 않았습니다")
+            onFinalizeEnded?.invoke()
+            return
+        }
 
         // 화면 꺼짐 대기 상태에서 CPU 슬립을 막기 위해 WakeLock 획득
         renewWakeLock(currentSegmentDurationMs() + WAKE_LOCK_GRACE_MS)
@@ -656,6 +703,11 @@ class CameraController(private val context: Context) {
     fun isRecording(): Boolean = recording != null
 
     fun release() {
+        released = true
+        onRecordingEvent = null
+        onCameraChanged = null
+        onZoomChanged = null
+        onError = null
         recording?.stop()
         recording = null
         mainHandler.removeCallbacks(autoStopRunnable)
