@@ -252,6 +252,7 @@ class CameraController(private val context: Context) {
 
     fun reportError(message: String) {
         lastError = message
+        android.util.Log.w("CameraController", message)
         onError?.invoke(message)
     }
 
@@ -416,7 +417,9 @@ class CameraController(private val context: Context) {
     fun getMaxZoomRatio(): Float = nativeMax() * lensScale(activeCameraId())
     fun displayZoomRatio(): Float = zoomRatio * lensScale(activeCameraId())
 
-    fun setZoomRatio(ratio: Float) {
+    fun setZoomRatio(ratio: Float) = applyZoomRatio(ratio, allowRebind = true)
+
+    private fun applyZoomRatio(ratio: Float, allowRebind: Boolean) {
         val cam = camera ?: run { pendingZoomAfterBind = ratio; return }
         val generation = cameraGeneration
         val request = ++zoomRequest
@@ -430,7 +433,12 @@ class CameraController(private val context: Context) {
                 onZoomChanged?.invoke(displayZoomRatio(), getMaxZoomRatio())
                 onCameraChanged?.invoke(activeCameraId())
                 onControlsApplied?.invoke()
-            }.onFailure { reportError("배율 적용 실패: ${it.message}") }
+            }.onFailure {
+                if (allowRebind && !isRecording()) {
+                    pendingZoomAfterBind = applied
+                    bindUseCases()
+                } else reportError("배율 적용 실패: ${it.message}")
+            }
         }, ContextCompat.getMainExecutor(context))
     }
 
@@ -472,7 +480,7 @@ class CameraController(private val context: Context) {
     private fun applyPendingZoomAfterBind() {
         val requested = pendingZoomAfterBind ?: zoomRatio
         pendingZoomAfterBind = null
-        setZoomRatio(requested)
+        applyZoomRatio(requested, allowRebind = false)
     }
 
     private fun updateZoomBounds() {
