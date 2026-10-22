@@ -68,6 +68,11 @@ class CameraController(private val context: Context) {
     }
     private var released = false
     private var configuring = false
+    private var cameraGeneration = 0L
+    private var zoomRequest = 0L
+    private var exposureRequest = 0L
+    private var optionsRequest = 0L
+    private var focusRequest = 0L
     var lastError: String? = null
         private set
     var onError: ((String) -> Unit)? = null
@@ -227,7 +232,8 @@ class CameraController(private val context: Context) {
             return
         }
         try {
-            val preview = Preview.Builder().setTargetRotation(view.display?.rotation ?: android.view.Surface.ROTATION_0).build()
+            val preview = Preview.Builder().setTargetRotation(view.display?.rotation ?: android.view.Surface.ROTATION_0)
+                .setDynamicRange(video.dynamicRange).build()
             preview.setSurfaceProvider(view.surfaceProvider)
             camera = provider.bindToLifecycle(owner, buildSelector(), video, preview)
             previewUseCase = preview
@@ -255,6 +261,7 @@ class CameraController(private val context: Context) {
 
         if (isRecording() || configuring || released) return
 
+        cameraGeneration++
         provider.unbindAll()
         camera = null
         videoCapture = null
@@ -313,6 +320,8 @@ class CameraController(private val context: Context) {
     private fun applyOptionsLive() {
         if (configuring || released) return
         val cam = camera ?: return
+        val generation = cameraGeneration
+        val request = ++optionsRequest
         val control = Camera2CameraControl.from(cam.cameraControl)
         val builder = CaptureRequestOptions.Builder()
         
@@ -374,7 +383,8 @@ class CameraController(private val context: Context) {
 
         val future = control.setCaptureRequestOptions(builder.build())
         future.addListener({
-            if (cam === camera && !released) runCatching { future.get() }.onFailure { reportError("수동 설정 적용 실패: ${it.message}") }
+            if (cam === camera && generation == cameraGeneration && request == optionsRequest && !released)
+                runCatching { future.get() }.onFailure { reportError("수동 설정 적용 실패: ${it.message}") }
         }, ContextCompat.getMainExecutor(context))
     }
 
@@ -397,10 +407,12 @@ class CameraController(private val context: Context) {
 
     fun setZoomRatio(ratio: Float) {
         val cam = camera ?: run { pendingZoomAfterBind = ratio; return }
+        val generation = cameraGeneration
+        val request = ++zoomRequest
         val applied = ratio.coerceIn(nativeMin(), nativeMax())
         val future = cam.cameraControl.setZoomRatio(applied)
         future.addListener({
-            if (cam !== camera || released) return@addListener
+            if (cam !== camera || generation != cameraGeneration || request != zoomRequest || released) return@addListener
             runCatching { future.get() }.onSuccess {
                 zoomRatio = cam.cameraInfo.zoomState.value?.zoomRatio ?: applied
                 selectedZoomModeRatio = displayZoomRatio()
@@ -470,6 +482,8 @@ class CameraController(private val context: Context) {
     // 원터치 초점 (Tap to Focus)
     fun tapToFocus(x: Float, y: Float) {
         val cam = camera ?: return
+        val generation = cameraGeneration
+        val request = ++focusRequest
         val view = previewView ?: return
         val factory = view.meteringPointFactory
         val point = factory.createPoint(x, y)
@@ -482,7 +496,8 @@ class CameraController(private val context: Context) {
         }
         val future = cam.cameraControl.startFocusAndMetering(action)
         future.addListener({
-            if (cam === camera && !released) onFocusResult?.invoke(runCatching { future.get().isFocusSuccessful }.getOrDefault(false))
+            if (cam === camera && generation == cameraGeneration && request == focusRequest && !released)
+                onFocusResult?.invoke(runCatching { future.get().isFocusSuccessful }.getOrDefault(false))
         }, ContextCompat.getMainExecutor(context))
     }
 
@@ -554,13 +569,15 @@ class CameraController(private val context: Context) {
 
     fun setExposureIndex(index: Int) {
         val cam = camera ?: return
+        val generation = cameraGeneration
+        val request = ++exposureRequest
         if (exposureTimeNs != null) { reportError("수동 셔터 사용 중에는 노출 보정을 사용할 수 없습니다"); return }
         val state = cam.cameraInfo.exposureState
         if (!state.isExposureCompensationSupported) return
         val clamped = index.coerceIn(getMinExposureIndex(), getMaxExposureIndex())
         val future = cam.cameraControl.setExposureCompensationIndex(clamped)
         future.addListener({
-            if (cam !== camera || released) return@addListener
+            if (cam !== camera || generation != cameraGeneration || request != exposureRequest || released) return@addListener
             runCatching { future.get() }.onSuccess {
                 exposureEv = it * state.exposureCompensationStep.toFloat()
                 onControlsApplied?.invoke()
