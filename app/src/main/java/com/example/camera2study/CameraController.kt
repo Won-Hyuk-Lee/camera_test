@@ -324,6 +324,17 @@ class CameraController(private val context: Context) {
         val request = ++optionsRequest
         val control = Camera2CameraControl.from(cam.cameraControl)
         val builder = CaptureRequestOptions.Builder()
+        // CameraX owns output rotation. Disable the framework's additional crop/rotation.
+        if (android.os.Build.VERSION.SDK_INT >= 31 && Camera2CameraInfo.from(cam.cameraInfo)
+                .getCameraCharacteristic(android.hardware.camera2.CameraCharacteristics.SCALER_AVAILABLE_ROTATE_AND_CROP_MODES)
+                ?.contains(CaptureRequest.SCALER_ROTATE_AND_CROP_NONE) == true) {
+            builder.setCaptureRequestOption(CaptureRequest.SCALER_ROTATE_AND_CROP, CaptureRequest.SCALER_ROTATE_AND_CROP_NONE)
+        }
+        // Apply zoom and metering together; early zoom overrides are optional, not needed for recording.
+        if (android.os.Build.VERSION.SDK_INT >= 34 && Camera2CameraInfo.from(cam.cameraInfo)
+                .getCameraCharacteristic(android.hardware.camera2.CameraCharacteristics.CONTROL_AVAILABLE_SETTINGS_OVERRIDES) != null) {
+            builder.setCaptureRequestOption(CaptureRequest.CONTROL_SETTINGS_OVERRIDE, CaptureRequest.CONTROL_SETTINGS_OVERRIDE_OFF)
+        }
         
         // AWB 모드
         builder.setCaptureRequestOption(CaptureRequest.CONTROL_AWB_MODE, awbMode)
