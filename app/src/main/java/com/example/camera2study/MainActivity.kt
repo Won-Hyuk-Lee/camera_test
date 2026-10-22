@@ -45,10 +45,20 @@ class MainActivity : AppCompatActivity() {
 
     override fun onStop() {
         if (!isChangingConfigurations) {
-            entry.authenticated = false
-            entry.resetEntry = true
-            binding.root.visibility = View.INVISIBLE
+            lockEntry()
         }
         super.onStop()
+    }
+
+    override fun onUserLeaveHint() {
+        // Lock before the Home/Recents animation, even if the user returns before onStop.
+        lockEntry()
+        super.onUserLeaveHint()
+    }
+
+    private fun lockEntry() {
+        entry.authenticated = false
+        entry.resetEntry = true
+        binding.root.visibility = View.INVISIBLE
     }
 }
