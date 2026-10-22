@@ -72,7 +72,6 @@ class CameraController(private val context: Context) {
     private var previewView: PreviewView? = null
 
     private var lensFacing: Int = CameraSelector.LENS_FACING_BACK
-    private var targetBackCameraId: String? = null
     private var pendingZoomAfterBind: Float? = null
 
     private var awbMode: Int = CameraMetadata.CONTROL_AWB_MODE_AUTO
@@ -315,11 +314,11 @@ class CameraController(private val context: Context) {
 
     private fun buildSelector(): CameraSelector {
         val builder = CameraSelector.Builder().requireLensFacing(lensFacing)
-        val targetId = targetBackCameraId
-        if (lensFacing == CameraSelector.LENS_FACING_BACK && targetId != null) {
+        val targetId = selectedCameraId
+        if (targetId != null) {
             builder.addCameraFilter { cameras ->
                 cameras.filter { Camera2CameraInfo.from(it).cameraId == targetId }
-                    .ifEmpty { cameras }
+
             }
         }
         return builder.build()
@@ -381,87 +380,92 @@ class CameraController(private val context: Context) {
         control.setCaptureRequestOptions(builder.build())
     }
 
-    // 줌 제어 API
+    private fun nativeMin(): Float = camera?.cameraInfo?.zoomState?.value?.minZoomRatio ?: 1f
+    private fun nativeMax(): Float = camera?.cameraInfo?.zoomState?.value?.maxZoomRatio ?: 1f
+
+    private fun lensScale(id: String?): Float {
+        if (!isFacingBack() || id == null) return 1f
+        val primary = cameraProvider?.availableCameraInfos?.let {
+            runCatching { CameraSelector.DEFAULT_BACK_CAMERA.filter(it).firstOrNull() }.getOrNull()
+        }?.let { Camera2CameraInfo.from(it).cameraId }
+        val base = backLenses.firstOrNull { it.cameraId == primary }?.equivalentFocalLength ?: return 1f
+        val focal = backLenses.firstOrNull { it.cameraId == id }?.equivalentFocalLength ?: return 1f
+        return if (base > 0 && focal > 0) focal / base else 1f
+    }
+
+    fun getMinZoomRatio(): Float = nativeMin() * lensScale(activeCameraId())
+    fun getMaxZoomRatio(): Float = nativeMax() * lensScale(activeCameraId())
+    fun displayZoomRatio(): Float = zoomRatio * lensScale(activeCameraId())
+
     fun setZoomRatio(ratio: Float) {
-        val cam = camera ?: return
-        val zoomState = cam.cameraInfo.zoomState.value ?: return
-        val clamped = ratio.coerceIn(zoomState.minZoomRatio, zoomState.maxZoomRatio)
-        cam.cameraControl.setZoomRatio(clamped)
-        zoomRatio = clamped
-        onZoomChanged?.invoke(clamped, zoomState.maxZoomRatio)
+        val cam = camera ?: run { pendingZoomAfterBind = ratio; return }
+        val applied = ratio.coerceIn(nativeMin(), nativeMax())
+        val future = cam.cameraControl.setZoomRatio(applied)
+        future.addListener({
+            if (cam !== camera || released) return@addListener
+            runCatching { future.get() }.onSuccess {
+                zoomRatio = cam.cameraInfo.zoomState.value?.zoomRatio ?: applied
+                selectedZoomModeRatio = displayZoomRatio()
+                onZoomChanged?.invoke(displayZoomRatio(), getMaxZoomRatio())
+                onCameraChanged?.invoke(activeCameraId())
+            }.onFailure { reportError("배율 적용 실패: ${it.message}") }
+        }, ContextCompat.getMainExecutor(context))
     }
 
-    fun getMinZoomRatio(): Float {
-        return camera?.cameraInfo?.zoomState?.value?.minZoomRatio ?: 1.0f
-    }
+    fun setDisplayZoomRatio(ratio: Float) = setZoomRatio(ratio / lensScale(activeCameraId()))
 
-    fun getMaxZoomRatio(): Float {
-        return camera?.cameraInfo?.zoomState?.value?.maxZoomRatio ?: 8.0f
-    }
-
-    fun selectBackZoomMode(modeRatio: Float): Boolean {
-        if (isRecording()) return false
-
-        lensFacing = CameraSelector.LENS_FACING_BACK
-        selectedZoomModeRatio = if (modeRatio < 1.0f) 0.6f else 1.0f
-
-        if (selectedZoomModeRatio >= 1.0f) {
-            targetBackCameraId = null
-            pendingZoomAfterBind = 1.0f
-            bindUseCases()
-            return true
+    fun supportsZoomPreset(ratio: Float): Boolean {
+        if (ratio in getMinZoomRatio()..getMaxZoomRatio()) return true
+        if (!isFacingBack() || isRecording()) return false
+        return cameraProvider?.availableCameraInfos.orEmpty().filter { it.lensFacing == CameraSelector.LENS_FACING_BACK }.any {
+            val scale = lensScale(Camera2CameraInfo.from(it).cameraId)
+            val z = it.zoomState.value
+            z != null && ratio >= z.minZoomRatio * scale - 0.08f && ratio <= z.maxZoomRatio * scale
         }
+    }
 
-        val currentMin = getMinZoomRatio()
-        if (targetBackCameraId == null && currentMin <= selectedZoomModeRatio) {
-            setZoomRatio(selectedZoomModeRatio)
-            return true
-        }
+    fun selectBackZoomMode(modeRatio: Float): Boolean = selectZoomPreset(modeRatio)
 
-        targetBackCameraId = findUltraWideCameraId()
-        pendingZoomAfterBind = selectedZoomModeRatio
+    fun selectZoomPreset(ratio: Float): Boolean {
+        if (!supportsZoomPreset(ratio)) { reportError("이 카메라에서 지원하지 않는 배율입니다"); return false }
+        if (!isFacingBack() || isRecording()) { setDisplayZoomRatio(ratio); return true }
+        val candidates = cameraProvider?.availableCameraInfos.orEmpty().filter { it.lensFacing == CameraSelector.LENS_FACING_BACK }
+        val primary = runCatching { CameraSelector.DEFAULT_BACK_CAMERA.filter(candidates).firstOrNull() }.getOrNull()
+        // Prefer a publicly exposed optical lens at telephoto presets; otherwise let the logical camera crop/switch.
+        val physical = candidates.filter {
+            val scale = lensScale(Camera2CameraInfo.from(it).cameraId)
+            val z = it.zoomState.value
+            z != null && ((ratio < 1f && scale < 0.85f) || (ratio >= 2f && scale > 1.5f)) &&
+                ratio >= z.minZoomRatio * scale - 0.08f && ratio <= z.maxZoomRatio * scale
+        }.maxByOrNull { lensScale(Camera2CameraInfo.from(it).cameraId) }
+        val desired = physical ?: primary
+        val id = desired?.let { Camera2CameraInfo.from(it).cameraId }
+        if (id == null || id == activeCameraId()) { setDisplayZoomRatio(ratio); return true }
+        selectedCameraId = id
+        pendingZoomAfterBind = ratio / lensScale(id)
         bindUseCases()
-        return true
+        return camera != null
     }
 
     private fun applyPendingZoomAfterBind() {
-        val requested = pendingZoomAfterBind ?: return
+        val requested = pendingZoomAfterBind ?: zoomRatio
         pendingZoomAfterBind = null
-
-        val min = getMinZoomRatio()
-        val applied = if (requested < 1.0f && min > requested) {
-            1.0f
-        } else {
-            requested
-        }
-        setZoomRatio(applied)
-    }
-
-    private fun findUltraWideCameraId(): String? {
-        val availableIds = cameraProvider?.availableCameraInfos
-            ?.mapNotNull { info ->
-                runCatching { Camera2CameraInfo.from(info).cameraId }.getOrNull()
-            }
-            ?.toSet()
-            .orEmpty()
-        val availableBackLenses = if (availableIds.isEmpty()) {
-            backLenses
-        } else {
-            backLenses.filter { it.cameraId in availableIds }
-        }
-
-        return availableBackLenses
-            .filter { it.minZoomRatio <= 0.65f }
-            .minByOrNull { it.minZoomRatio }
-            ?.cameraId
-            ?: availableBackLenses.firstOrNull { it.isWide }?.cameraId
+        setZoomRatio(requested)
     }
 
     private fun updateZoomBounds() {
-        val cam = camera ?: return
-        val zoomState = cam.cameraInfo.zoomState.value ?: return
-        zoomRatio = zoomState.zoomRatio
-        onZoomChanged?.invoke(zoomRatio, zoomState.maxZoomRatio)
+        val z = camera?.cameraInfo?.zoomState?.value ?: return
+        zoomRatio = z.zoomRatio
+        selectedZoomModeRatio = displayZoomRatio()
+        onZoomChanged?.invoke(displayZoomRatio(), getMaxZoomRatio())
+    }
+
+    fun restoreCameraSelection(back: Boolean, id: String?, nativeZoom: Float) {
+        if (isRecording()) return
+        lensFacing = if (back) CameraSelector.LENS_FACING_BACK else CameraSelector.LENS_FACING_FRONT
+        selectedCameraId = id
+        pendingZoomAfterBind = nativeZoom
+        zoomRatio = nativeZoom
     }
 
     // 원터치 초점 (Tap to Focus)
@@ -478,24 +482,13 @@ class CameraController(private val context: Context) {
 
     fun switchFacing() {
         if (isRecording()) return
-        lensFacing = if (lensFacing == CameraSelector.LENS_FACING_BACK)
-            CameraSelector.LENS_FACING_FRONT else CameraSelector.LENS_FACING_BACK
-        if (lensFacing == CameraSelector.LENS_FACING_BACK) {
-            targetBackCameraId = null
-        } else {
-            targetBackCameraId = null
-        }
-        selectedZoomModeRatio = 1.0f
-        pendingZoomAfterBind = 1.0f
+        restoreCameraSelection(!isFacingBack(), null, 1f)
         bindUseCases()
     }
 
     fun selectBackLens(cameraId: String) {
         if (isRecording()) return
-        lensFacing = CameraSelector.LENS_FACING_BACK
-        targetBackCameraId = cameraId
-        selectedZoomModeRatio = 1.0f
-        pendingZoomAfterBind = 1.0f
+        restoreCameraSelection(true, cameraId, 1f)
         bindUseCases()
     }
 

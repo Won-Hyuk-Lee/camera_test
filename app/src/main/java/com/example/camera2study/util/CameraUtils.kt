@@ -10,7 +10,8 @@ data class LensInfo(
     val focalLength: Float,
     val isWide: Boolean,
     val minZoomRatio: Float,
-    val maxZoomRatio: Float
+    val maxZoomRatio: Float,
+    val equivalentFocalLength: Float = 0f
 )
 
 object CameraUtils {
@@ -36,14 +37,15 @@ object CameraUtils {
                 focalLength = focal,
                 isWide = false,
                 minZoomRatio = zoomRange?.lower ?: 1.0f,
-                maxZoomRatio = zoomRange?.upper ?: 1.0f
+                maxZoomRatio = zoomRange?.upper ?: chars.get(CameraCharacteristics.SCALER_AVAILABLE_MAX_DIGITAL_ZOOM) ?: 1.0f,
+                equivalentFocalLength = chars.get(CameraCharacteristics.SENSOR_INFO_PHYSICAL_SIZE)?.width?.takeIf { it > 0 }?.let { focal / it * 36f } ?: 0f
             )
         }.sortedBy { it.focalLength }
 
         if (raw.isEmpty()) return emptyList()
-        val minFocal = raw.first().focalLength
+        val main = raw.firstOrNull { it.cameraId == cm.cameraIdList.firstOrNull() } ?: raw.first()
         return raw.map { lens ->
-            lens.copy(isWide = lens.focalLength <= minFocal + 0.01f)
+            lens.copy(isWide = lens.equivalentFocalLength > 0 && main.equivalentFocalLength > 0 && lens.equivalentFocalLength < main.equivalentFocalLength * 0.85f)
         }
     }
 

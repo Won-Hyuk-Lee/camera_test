@@ -158,19 +158,7 @@ object CameraSettingsStore {
         controller.setExposureTime(settings.exposureTimeNs.takeIf { settings.proMode })
         controller.setAperture(settings.aperture.takeIf { settings.proMode })
 
-        if (!settings.lensFacingBack && controller.isFacingBack()) {
-            controller.switchFacing()
-        } else if (settings.lensFacingBack && !controller.isFacingBack()) {
-            controller.switchFacing()
-        }
-
-        if (controller.isFacingBack()) {
-            controller.selectBackZoomMode(settings.zoomModeRatio)
-        } else {
-            controller.setZoomRatio(settings.zoomRatio)
-        }
-
-        controller.selectedCameraId = settings.cameraId
+        controller.restoreCameraSelection(settings.lensFacingBack, settings.cameraId, settings.zoomRatio)
         controller.currentRatioMode = settings.ratioMode
     }
 

@@ -197,7 +197,7 @@ class CameraFragment : Fragment() {
             return
         }
         val lensFacingLabel = if (controller.isFacingBack()) "후면" else "전면"
-        val zoomModeLabel = if (controller.selectedZoomModeRatio < 1.0f) "0.6x 광각" else "1.0x 기본"
+        val zoomModeLabel = "%.2f× · 카메라 %s".format(controller.displayZoomRatio(), cameraId)
         binding.txtLensInfo.text = "$lensFacingLabel $zoomModeLabel"
     }
 
@@ -206,7 +206,11 @@ class CameraFragment : Fragment() {
     private val zoomPresets: List<ZoomPreset>
         get() = listOf(
             ZoomPreset(binding.btnZoom06, 0.6f),
-            ZoomPreset(binding.btnZoom10, 1.0f)
+            ZoomPreset(binding.btnZoom10, 1.0f),
+            ZoomPreset(binding.btnZoom20, 2f),
+            ZoomPreset(binding.btnZoom30, 3f),
+            ZoomPreset(binding.btnZoom50, 5f),
+            ZoomPreset(binding.btnZoom100, 10f)
         )
 
     private fun setupZoomListeners() {
@@ -215,48 +219,33 @@ class CameraFragment : Fragment() {
         val min = controller.getMinZoomRatio()
         val max = controller.getMaxZoomRatio()
 
-        binding.btnZoom20.visibility = View.GONE
-        binding.btnZoom30.visibility = View.GONE
-        binding.btnZoom50.visibility = View.GONE
-        binding.btnZoom100.visibility = View.GONE
-        binding.sliderZoom.visibility = View.GONE
-
-        // 단말이 지원하지 않는 프리셋은 숨긴다.
         zoomPresets.forEach { preset ->
-            preset.button.visibility = View.VISIBLE
-            preset.button.setOnClickListener {
-                if (controller.selectBackZoomMode(preset.ratio)) {
-                    saveCameraSettings()
-                }
-            }
+            preset.button.setOnClickListener { controller.selectZoomPreset(preset.ratio) }
         }
-
-        binding.sliderZoom.valueFrom = min
-        binding.sliderZoom.valueTo = max
-        binding.sliderZoom.value = controller.zoomRatio.coerceIn(min, max)
-
+        binding.sliderZoom.clearOnChangeListeners()
         binding.sliderZoom.addOnChangeListener { _, value, fromUser ->
-            if (fromUser) {
-                controller.setZoomRatio(value)
-                saveCameraSettings()
-            }
+            if (fromUser) controller.setDisplayZoomRatio(value)
         }
+        updateZoomUi(controller.displayZoomRatio(), max)
     }
 
     private fun updateZoomUi(current: Float, max: Float) {
         val binding = _binding ?: return
         if (!isAdded) return
-        binding.sliderZoom.valueTo = max
-        binding.sliderZoom.value = current.coerceIn(binding.sliderZoom.valueFrom, max)
-
-        // 현재 배율과 가장 가까운 프리셋만 활성 색상.
-        val activeMode = if (::controller.isInitialized) controller.selectedZoomModeRatio else current
+        val min = controller.getMinZoomRatio()
+        val upper = max.coerceAtLeast(min + 0.01f)
+        binding.sliderZoom.valueFrom = min
+        binding.sliderZoom.valueTo = upper
+        binding.sliderZoom.value = current.coerceIn(min, upper)
+        binding.sliderZoom.visibility = if (max > min) View.VISIBLE else View.GONE
         zoomPresets.forEach { preset ->
-            val active = kotlin.math.abs(preset.ratio - activeMode) < 0.05f
-            preset.button.setTextColor(if (active) Color.parseColor("#FFC107") else Color.WHITE)
+            preset.button.visibility = View.VISIBLE
+            preset.button.isEnabled = controller.supportsZoomPreset(preset.ratio)
+            preset.button.alpha = if (preset.button.isEnabled) 1f else 0.35f
+            preset.button.setTextColor(if (kotlin.math.abs(preset.ratio - current) < 0.08f) Color.parseColor("#FFC107") else Color.WHITE)
         }
+        updateLensIndicator(controller.activeCameraId())
     }
-
 
     private val exposureFadeRunnable = Runnable {
         binding.sliderExposure.visibility = View.GONE
