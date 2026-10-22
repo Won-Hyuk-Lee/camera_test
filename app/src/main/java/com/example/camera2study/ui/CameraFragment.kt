@@ -150,7 +150,6 @@ class CameraFragment : Fragment() {
                 }
                 binding.btnSwitchFacing.startAnimation(scale)
                 controller.switchFacing()
-                saveCameraSettings()
             }
         }
 
@@ -500,7 +499,7 @@ class CameraFragment : Fragment() {
     }
 
     private fun saveCameraSettings() {
-        if (!::controller.isInitialized || _binding == null || controller.isRecording()) return
+        if (!::controller.isInitialized || _binding == null || controller.isRecording() || !controller.areControlsReady()) return
         val settings = CameraSettingsStore.snapshot(
             requireContext(),
             controller,

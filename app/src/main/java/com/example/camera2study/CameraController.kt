@@ -73,6 +73,10 @@ class CameraController(private val context: Context) {
     private var exposureRequest = 0L
     private var optionsRequest = 0L
     private var focusRequest = 0L
+    private var zoomReady = false
+    private var exposureReady = false
+    fun areControlsReady(): Boolean = zoomReady && exposureReady
+    private fun notifyControlsApplied() { if (zoomReady && exposureReady) onControlsApplied?.invoke() }
     var lastError: String? = null
         private set
     var onError: ((String) -> Unit)? = null
@@ -263,6 +267,8 @@ class CameraController(private val context: Context) {
         if (isRecording() || configuring || released) return
 
         cameraGeneration++
+        zoomReady = false
+        exposureReady = false
         provider.unbindAll()
         camera = null
         videoCapture = null
@@ -423,6 +429,7 @@ class CameraController(private val context: Context) {
         val cam = camera ?: run { pendingZoomAfterBind = ratio; return }
         val generation = cameraGeneration
         val request = ++zoomRequest
+        zoomReady = false
         val applied = ratio.coerceIn(nativeMin(), nativeMax())
         val future = cam.cameraControl.setZoomRatio(applied)
         future.addListener({
@@ -430,9 +437,10 @@ class CameraController(private val context: Context) {
             runCatching { future.get() }.onSuccess {
                 zoomRatio = cam.cameraInfo.zoomState.value?.zoomRatio ?: applied
                 selectedZoomModeRatio = displayZoomRatio()
+                zoomReady = true
                 onZoomChanged?.invoke(displayZoomRatio(), getMaxZoomRatio())
                 onCameraChanged?.invoke(activeCameraId())
-                onControlsApplied?.invoke()
+                notifyControlsApplied()
             }.onFailure {
                 if (allowRebind && !isRecording()) {
                     pendingZoomAfterBind = applied
@@ -581,8 +589,11 @@ class CameraController(private val context: Context) {
         val state = camera?.cameraInfo?.exposureState ?: return
         if (!state.isExposureCompensationSupported || state.exposureCompensationStep.toFloat() <= 0) {
             exposureEv = 0f
+            exposureReady = true
+            notifyControlsApplied()
             return
         }
+        if (isProMode && exposureTimeNs != null) { exposureReady = true; notifyControlsApplied(); return }
         setExposureIndex(kotlin.math.round(exposureEv / state.exposureCompensationStep.toFloat()).toInt())
     }
 
@@ -590,6 +601,7 @@ class CameraController(private val context: Context) {
         val cam = camera ?: return
         val generation = cameraGeneration
         val request = ++exposureRequest
+        exposureReady = false
         if (exposureTimeNs != null) { reportError("수동 셔터 사용 중에는 노출 보정을 사용할 수 없습니다"); return }
         val state = cam.cameraInfo.exposureState
         if (!state.isExposureCompensationSupported) return
@@ -599,7 +611,8 @@ class CameraController(private val context: Context) {
             if (cam !== camera || generation != cameraGeneration || request != exposureRequest || released) return@addListener
             runCatching { future.get() }.onSuccess {
                 exposureEv = it * state.exposureCompensationStep.toFloat()
-                onControlsApplied?.invoke()
+                exposureReady = true
+                notifyControlsApplied()
             }.onFailure { reportError("밝기 적용 실패: ${it.message}") }
         }, ContextCompat.getMainExecutor(context))
     }
