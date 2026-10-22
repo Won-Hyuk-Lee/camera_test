@@ -67,6 +67,10 @@ class CameraFragment : Fragment() {
             isBound = true
 
             // 컨트롤러 이벤트 바인딩
+            controller.onControlsApplied = { if (_binding != null && !controller.isRecording()) saveCameraSettings() }
+            controller.onFocusResult = { success -> context?.let {
+                Toast.makeText(it, if (success) "초점을 맞췄습니다" else "초점 확인 실패 또는 미지원", Toast.LENGTH_SHORT).show()
+            } }
             controller.onCameraChanged = { id -> updateLensIndicator(id) }
             controller.onRecordingEvent = { event -> handleRecordEvent(event) }
             com.example.camera2study.RecordingRuntime.state.removeObservers(viewLifecycleOwner)
@@ -248,7 +252,7 @@ class CameraFragment : Fragment() {
     }
 
     private val exposureFadeRunnable = Runnable {
-        binding.sliderExposure.visibility = View.GONE
+        _binding?.sliderExposure?.visibility = View.GONE
     }
     private val handler = Handler(Looper.getMainLooper())
 
@@ -500,7 +504,7 @@ class CameraFragment : Fragment() {
     }
 
     private fun saveCameraSettings() {
-        if (!::controller.isInitialized) return
+        if (!::controller.isInitialized || _binding == null || controller.isRecording()) return
         val settings = CameraSettingsStore.snapshot(
             requireContext(),
             controller,
@@ -539,6 +543,8 @@ class CameraFragment : Fragment() {
             controller.onCameraChanged = null
             controller.onZoomChanged = null
             controller.onError = null
+            controller.onControlsApplied = null
+            controller.onFocusResult = null
             controller.detachPreview()
         }
 

@@ -83,6 +83,9 @@ object CameraSettingsStore {
     fun save(context: Context, settings: CameraSettings, quick: Boolean = false) {
         context.getSharedPreferences(if (quick) "quick_recording_pref" else PREF_NAME, Context.MODE_PRIVATE)
             .edit()
+            .putString("${if (settings.lensFacingBack) "back" else "front"}_camera_id", settings.cameraId)
+            .putFloat("${if (settings.lensFacingBack) "back" else "front"}_zoom", settings.zoomRatio)
+            .putFloat("${if (settings.lensFacingBack) "back" else "front"}_ev", settings.exposureEv)
             .putString("camera_id", settings.cameraId)
             .putFloat("exposure_ev", settings.exposureEv)
             .putBoolean("audio_enabled", settings.audioEnabled)
@@ -105,6 +108,15 @@ object CameraSettingsStore {
             .putLong(KEY_EXPOSURE_TIME_NS, settings.exposureTimeNs ?: NO_EXPOSURE_TIME)
             .putFloat(KEY_APERTURE, settings.aperture ?: NO_APERTURE)
             .apply()
+    }
+
+    fun loadForFacing(context: Context, back: Boolean): CameraSettings {
+        val pref = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+        val prefix = if (back) "back" else "front"
+        return load(context).copy(lensFacingBack = back,
+            cameraId = pref.getString("${prefix}_camera_id", null),
+            zoomRatio = pref.getFloat("${prefix}_zoom", 1f),
+            exposureEv = pref.getFloat("${prefix}_ev", 0f))
     }
 
     fun snapshot(context: Context, controller: CameraController, colorTempK: Int): CameraSettings {

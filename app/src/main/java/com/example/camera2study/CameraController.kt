@@ -173,6 +173,8 @@ class CameraController(private val context: Context) {
     var onRecordingEvent: ((VideoRecordEvent) -> Unit)? = null
     var onCameraChanged: ((String?) -> Unit)? = null
     var onZoomChanged: ((Float, Float) -> Unit)? = null // current, max
+    var onControlsApplied: (() -> Unit)? = null
+    var onFocusResult: ((Boolean) -> Unit)? = null
     var onFinalizeEnded: (() -> Unit)? = null
 
     val backLenses: List<LensInfo> by lazy { CameraUtils.listBackLenses(context) }
@@ -303,6 +305,7 @@ class CameraController(private val context: Context) {
 
             applyOptionsLive()
             applyPendingZoomAfterBind()
+            applyExposureAfterBind()
             updateZoomBounds()
 
             val activeId = camera?.let { Camera2CameraInfo.from(it.cameraInfo).cameraId }
@@ -367,7 +370,7 @@ class CameraController(private val context: Context) {
             builder.setCaptureRequestOption(CaptureRequest.LENS_APERTURE, it)
         }
 
-        builder.setCaptureRequestOption(CaptureRequest.CONTROL_AF_MODE, CameraMetadata.CONTROL_AF_MODE_CONTINUOUS_VIDEO)
+        // CameraX owns AF mode and temporarily changes it for tap-to-focus.
 
         // 노출 자동 보정 및 안티밴딩
         if (expNs == null) {
@@ -408,6 +411,7 @@ class CameraController(private val context: Context) {
                 selectedZoomModeRatio = displayZoomRatio()
                 onZoomChanged?.invoke(displayZoomRatio(), getMaxZoomRatio())
                 onCameraChanged?.invoke(activeCameraId())
+                onControlsApplied?.invoke()
             }.onFailure { reportError("배율 적용 실패: ${it.message}") }
         }, ContextCompat.getMainExecutor(context))
     }
@@ -477,12 +481,21 @@ class CameraController(private val context: Context) {
         val action = FocusMeteringAction.Builder(point, FocusMeteringAction.FLAG_AF or FocusMeteringAction.FLAG_AE)
             .setAutoCancelDuration(3, TimeUnit.SECONDS) // 3초 후 연속 초점으로 복귀
             .build()
-        cam.cameraControl.startFocusAndMetering(action)
+        if (!cam.cameraInfo.isFocusMeteringSupported(action)) {
+            onFocusResult?.invoke(false)
+            return
+        }
+        val future = cam.cameraControl.startFocusAndMetering(action)
+        future.addListener({
+            if (cam === camera && !released) onFocusResult?.invoke(runCatching { future.get().isFocusSuccessful }.getOrDefault(false))
+        }, ContextCompat.getMainExecutor(context))
     }
 
     fun switchFacing() {
         if (isRecording()) return
-        restoreCameraSelection(!isFacingBack(), null, 1f)
+        val saved = com.example.camera2study.util.CameraSettingsStore.loadForFacing(context, !isFacingBack())
+        exposureEv = saved.exposureEv
+        restoreCameraSelection(saved.lensFacingBack, saved.cameraId, saved.zoomRatio)
         bindUseCases()
     }
 
@@ -535,13 +548,30 @@ class CameraController(private val context: Context) {
     fun getCurrentExposureIndex(): Int =
         camera?.cameraInfo?.exposureState?.exposureCompensationIndex ?: 0
 
-    fun setExposureIndex(index: Int) {
-        val min = getMinExposureIndex()
-        val max = getMaxExposureIndex()
-        val clamped = index.coerceIn(min, max)
-        camera?.cameraControl?.setExposureCompensationIndex(clamped)
+    private fun applyExposureAfterBind() {
+        val state = camera?.cameraInfo?.exposureState ?: return
+        if (!state.isExposureCompensationSupported || state.exposureCompensationStep.toFloat() <= 0) {
+            exposureEv = 0f
+            return
+        }
+        setExposureIndex(kotlin.math.round(exposureEv / state.exposureCompensationStep.toFloat()).toInt())
     }
 
+    fun setExposureIndex(index: Int) {
+        val cam = camera ?: return
+        if (exposureTimeNs != null) { reportError("수동 셔터 사용 중에는 노출 보정을 사용할 수 없습니다"); return }
+        val state = cam.cameraInfo.exposureState
+        if (!state.isExposureCompensationSupported) return
+        val clamped = index.coerceIn(getMinExposureIndex(), getMaxExposureIndex())
+        val future = cam.cameraControl.setExposureCompensationIndex(clamped)
+        future.addListener({
+            if (cam !== camera || released) return@addListener
+            runCatching { future.get() }.onSuccess {
+                exposureEv = it * state.exposureCompensationStep.toFloat()
+                onControlsApplied?.invoke()
+            }.onFailure { reportError("밝기 적용 실패: ${it.message}") }
+        }, ContextCompat.getMainExecutor(context))
+    }
 
     private var session: org.json.JSONObject? = null
     private var segmentEntry: org.json.JSONObject? = null
@@ -774,6 +804,8 @@ class CameraController(private val context: Context) {
         onCameraChanged = null
         onZoomChanged = null
         onError = null
+        onControlsApplied = null
+        onFocusResult = null
         releaseWakeLock()
         cameraProvider?.unbindAll()
         camera = null
