@@ -49,11 +49,11 @@ class CameraFragment : Fragment() {
         override fun run() {
             val binding = _binding ?: return
             if (!::controller.isInitialized) return
-            val elapsed = SystemClock.elapsedRealtime() - recordStartMs
+            val elapsed = controller.recordingState.durationMs
             val repeatStr = if (controller.maxRepeatCount > 1) {
                 " [${controller.currentRepeatCount + 1}/${controller.maxRepeatCount}]"
             } else ""
-            binding.txtTimer.text = formatElapsed(elapsed) + repeatStr
+            binding.txtTimer.text = formatElapsed(elapsed) + " · " + controller.recordingState.message
             binding.txtTimer.postDelayed(this, 200L)
         }
     }
@@ -69,6 +69,14 @@ class CameraFragment : Fragment() {
             // 컨트롤러 이벤트 바인딩
             controller.onCameraChanged = { id -> updateLensIndicator(id) }
             controller.onRecordingEvent = { event -> handleRecordEvent(event) }
+            com.example.camera2study.RecordingRuntime.state.removeObservers(viewLifecycleOwner)
+            com.example.camera2study.RecordingRuntime.state.observe(viewLifecycleOwner) { state ->
+                if (_binding != null) {
+                    binding.btnSettings.isEnabled = !state.active
+                    binding.btnSwitchFacing.isEnabled = !state.active
+                    binding.txtTimer.text = formatElapsed(state.durationMs) + " · " + state.message
+                }
+            }
             controller.onZoomChanged = { current, max -> updateZoomUi(current, max) }
             controller.onError = { message ->
                 context?.let { Toast.makeText(it, message, Toast.LENGTH_LONG).show() }

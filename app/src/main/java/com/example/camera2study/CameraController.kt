@@ -151,7 +151,10 @@ class CameraController(private val context: Context) {
     private val mainHandler = Handler(Looper.getMainLooper())
     private val autoStopRunnable = Runnable {
         isAutoStopping = true
-        stopRecording()
+        if (isRecording()) {
+            publish(RecordingPhase.FINALIZING, "파일 저장 중")
+            recording?.stop()
+        }
     }
     private var isAutoStopping = false // 최대 시간에 의해 중지되었는지 여부
 
@@ -540,177 +543,236 @@ class CameraController(private val context: Context) {
     }
 
 
-    // --- 동영상 녹화 (Start Recording) ---
+    private var session: org.json.JSONObject? = null
+    private var segmentEntry: org.json.JSONObject? = null
+    private var sessionDurationMs = 0L
+    private var sessionBytes = 0L
+    private var segmentDurationMs = 0L
+    private var segmentBytes = 0L
+    private var failure: String? = null
+    private var stopReason = "user"
+    private var stopRequested = false
+    private var recordingToken = 0L
+    private var lastProgressAt = 0L
+    private var lastJournalAt = 0L
+    private var phaseSince = 0L
+    private var sessionSegmentMs = LONG_RECORDING_SEGMENT_MS
+    private var sessionFileCount = 0
+    private val restartRunnable = Runnable { if (!stopRequested && !released) startSegment() }
+    val recordingState: RecordingState get() = RecordingRuntime.state.value ?: RecordingState()
+
+    private fun publish(phase: RecordingPhase, message: String) {
+        if (recordingState.phase != phase) phaseSince = android.os.SystemClock.elapsedRealtime()
+        RecordingRuntime.state.value = RecordingState(phase, session?.optString("id").orEmpty(),
+            currentRepeatCount + 1, sessionDurationMs + segmentDurationMs, sessionBytes + segmentBytes,
+            message, segmentEntry?.optString("path").orEmpty())
+    }
+
+    private val healthCheck = object : Runnable {
+        override fun run() {
+            if (!isRecording() || released) return
+            val now = android.os.SystemClock.elapsedRealtime()
+            when (recordingState.phase) {
+                RecordingPhase.PREPARING, RecordingPhase.RECORDING -> {
+                    if (now - lastProgressAt > 15_000L) {
+                        failure = "영상 데이터 기록이 15초 동안 진행되지 않았습니다"
+                        reportError(failure!!)
+                        stopRecording("progress_timeout")
+                    }
+                }
+                RecordingPhase.FINALIZING -> if (now - phaseSince > 15_000L) {
+                    failure = failure ?: "파일 저장 완료를 확인하지 못했습니다"
+                    recording?.close()
+                    recording = null
+                    finishSession()
+                    return
+                }
+                else -> Unit
+            }
+            renewWakeLock(60_000L)
+            mainHandler.postDelayed(this, 2_000L)
+        }
+    }
+
     @SuppressLint("MissingPermission", "InvalidWakeLockTag")
-    fun startRecording() {
-        if (released || recording != null) return
-        val vc = videoCapture ?: run {
-            reportError(lastError ?: "카메라가 준비되지 않았습니다")
-            onFinalizeEnded?.invoke()
+    fun startRecording(source: String = "app") {
+        if (released || isRecording()) return
+        session = com.example.camera2study.util.RecordingJournal.begin(context, source,
+            "camera=${activeCameraId()}, zoom=$zoomRatio, quality=$videoQuality, fps=$targetFps, hdr=$isHdrEnabled")
+        failure = null
+        stopReason = "user"
+        stopRequested = false
+        currentRepeatCount = 0
+        sessionDurationMs = 0
+        sessionBytes = 0
+        sessionSegmentMs = if (maxDurationMs > 0) maxDurationMs else LONG_RECORDING_SEGMENT_MS
+        sessionFileCount = if (maxDurationMs == 0L || maxRepeatCount >= 999) 0 else maxRepeatCount.coerceAtLeast(1)
+        startSegment()
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun startSegment() {
+        if (released || stopRequested) return
+        val journal = session ?: return
+        segmentDurationMs = 0
+        segmentBytes = 0
+        segmentEntry = null
+        lastProgressAt = android.os.SystemClock.elapsedRealtime()
+        lastJournalAt = 0L
+        publish(RecordingPhase.PREPARING, "녹화 준비 중")
+        val vc = videoCapture
+        if (vc == null) {
+            failure = lastError ?: "카메라가 준비되지 않았습니다"
+            finishSession()
             return
         }
-
-        // 화면 꺼짐 대기 상태에서 CPU 슬립을 막기 위해 WakeLock 획득
-        renewWakeLock(currentSegmentDurationMs() + WAKE_LOCK_GRACE_MS)
-
-        val name = "StudyVault_${System.currentTimeMillis()}.mp4"
-        val prep = if (isPrivateSave) {
-            val privateDir = File(context.getExternalFilesDir(null), "private_vault")
-            if (!privateDir.exists()) privateDir.mkdirs()
-            val nomedia = File(privateDir, ".nomedia")
-            if (!nomedia.exists()) nomedia.createNewFile()
-            
-            val file = File(privateDir, name)
-            val fileOptions = FileOutputOptions.Builder(file).build()
-            vc.output.prepareRecording(context, fileOptions)
-        } else {
-            val values = ContentValues().apply {
-                put(MediaStore.MediaColumns.DISPLAY_NAME, name)
-                put(MediaStore.MediaColumns.MIME_TYPE, "video/mp4")
-                put(MediaStore.Video.Media.RELATIVE_PATH, "Movies/StudyVault")
-            }
-            val mediaOptions = MediaStoreOutputOptions.Builder(
-                context.contentResolver,
-                MediaStore.Video.Media.EXTERNAL_CONTENT_URI
-            ).setContentValues(values).build()
-            vc.output.prepareRecording(context, mediaOptions)
-        }
-
-        isAutoStopping = false
-        isRecordingPaused = false
-        totalPausedMs = 0L
-
-        prep.withAudioEnabled()
-
-        recording = prep.start(ContextCompat.getMainExecutor(context)) { event: VideoRecordEvent ->
-            if (event is VideoRecordEvent.Start) {
-                recordingStartElapsedMs = android.os.SystemClock.elapsedRealtime()
-                mainHandler.removeCallbacks(autoStopRunnable)
-                mainHandler.postDelayed(autoStopRunnable, currentSegmentDurationMs())
-                onRecordingEvent?.invoke(event)
-            }
-
-            if (event is VideoRecordEvent.Pause) {
-                isRecordingPaused = true
-                pauseStartElapsedMs = android.os.SystemClock.elapsedRealtime()
-                // pause 동안 auto-stop 타이머를 멈춘다.
-                mainHandler.removeCallbacks(autoStopRunnable)
-                onRecordingEvent?.invoke(event)
-            }
-
-            if (event is VideoRecordEvent.Resume) {
-                isRecordingPaused = false
-                val pausedSegment = android.os.SystemClock.elapsedRealtime() - pauseStartElapsedMs
-                totalPausedMs += pausedSegment
-                // 잔여 시간 기준으로 auto-stop 재예약한다.
-                val elapsed = android.os.SystemClock.elapsedRealtime() - recordingStartElapsedMs - totalPausedMs
-                val remaining = currentSegmentDurationMs() - elapsed
-                if (remaining > 0) {
-                    mainHandler.postDelayed(autoStopRunnable, remaining)
-                } else {
-                    isAutoStopping = true
-                    stopRecording()
+        renewWakeLock(60_000L)
+        mainHandler.removeCallbacks(healthCheck)
+        mainHandler.postDelayed(healthCheck, 2_000L)
+        val token = ++recordingToken
+        try {
+            val name = "StudyVault_${journal.getString("id")}_${currentRepeatCount + 1}.mp4"
+            val prep = if (isPrivateSave) {
+                val dir = File(context.getExternalFilesDir(null) ?: context.filesDir, "private_vault")
+                check(dir.exists() || dir.mkdirs()) { "저장 폴더를 만들 수 없습니다" }
+                File(dir, ".nomedia").createNewFile()
+                val file = File(dir, name)
+                segmentEntry = com.example.camera2study.util.RecordingJournal.segment(context, journal, file.absolutePath, name)
+                vc.output.prepareRecording(context, FileOutputOptions.Builder(file).build())
+            } else {
+                val values = ContentValues().apply {
+                    put(MediaStore.MediaColumns.DISPLAY_NAME, name)
+                    put(MediaStore.MediaColumns.MIME_TYPE, "video/mp4")
+                    if (android.os.Build.VERSION.SDK_INT >= 29) put(MediaStore.Video.Media.RELATIVE_PATH, "Movies/StudyVault")
                 }
-                onRecordingEvent?.invoke(event)
+                segmentEntry = com.example.camera2study.util.RecordingJournal.segment(context, journal, "", name)
+                vc.output.prepareRecording(context, MediaStoreOutputOptions.Builder(context.contentResolver,
+                    MediaStore.Video.Media.EXTERNAL_CONTENT_URI).setContentValues(values).build())
             }
-
-            if (event is VideoRecordEvent.Finalize) {
-                mainHandler.removeCallbacks(autoStopRunnable)
-                recording = null
-                isRecordingPaused = false
-
-                // 연쇄 반복 녹화가 끝났을 때만 WakeLock을 완전 해제
-                val wasAutoStop = isAutoStopping
-                isAutoStopping = false
-
-                val willRepeat = wasAutoStop && !event.hasError() &&
-                    (isUnlimitedSegmentSession() || (currentRepeatCount + 1) < maxRepeatCount)
-
-                if (wasAutoStop && !event.hasError()) {
-                    currentRepeatCount++
-                    if (isUnlimitedSegmentSession() || currentRepeatCount < maxRepeatCount) {
-                        mainHandler.postDelayed({
-                            startRecording()
-                        }, 500L)
-                    } else {
-                        currentRepeatCount = 0
-                        releaseWakeLock()
+            isAutoStopping = false
+            isRecordingPaused = false
+            totalPausedMs = 0L
+            prep.withAudioEnabled()
+            recording = prep.start(ContextCompat.getMainExecutor(context)) { event ->
+                if (token != recordingToken) return@start
+                segmentDurationMs = event.recordingStats.recordedDurationNanos / 1_000_000L
+                val previousBytes = segmentBytes
+                segmentBytes = event.recordingStats.numBytesRecorded
+                if (segmentBytes > previousBytes) lastProgressAt = android.os.SystemClock.elapsedRealtime()
+                when (event) {
+                    is VideoRecordEvent.Start -> {
+                        recordingStartElapsedMs = android.os.SystemClock.elapsedRealtime()
+                        publish(RecordingPhase.PREPARING, "영상 데이터 확인 중")
+                        mainHandler.postDelayed(autoStopRunnable, sessionSegmentMs)
                     }
-                } else {
-                    currentRepeatCount = 0
-                    releaseWakeLock()
+                    is VideoRecordEvent.Status -> {
+                        if (!stopRequested && !isRecordingPaused && segmentBytes > 0 && segmentDurationMs > 0) {
+                            publish(RecordingPhase.RECORDING, "녹화 중")
+                        }
+                        val now = android.os.SystemClock.elapsedRealtime()
+                        if (now - lastJournalAt > 5_000L) {
+                            segmentEntry?.put("durationMs", segmentDurationMs)?.put("bytes", segmentBytes)
+                            com.example.camera2study.util.RecordingJournal.save(context, journal)
+                            lastJournalAt = now
+                        }
+                    }
+                    is VideoRecordEvent.Pause -> {
+                        isRecordingPaused = true
+                        pauseStartElapsedMs = android.os.SystemClock.elapsedRealtime()
+                        mainHandler.removeCallbacks(autoStopRunnable)
+                        publish(RecordingPhase.PAUSED, "일시정지")
+                    }
+                    is VideoRecordEvent.Resume -> {
+                        isRecordingPaused = false
+                        totalPausedMs += android.os.SystemClock.elapsedRealtime() - pauseStartElapsedMs
+                        lastProgressAt = android.os.SystemClock.elapsedRealtime()
+                        renewWakeLock(60_000L)
+                        mainHandler.postDelayed(autoStopRunnable, (sessionSegmentMs - segmentDurationMs).coerceAtLeast(1L))
+                        publish(RecordingPhase.RECORDING, "녹화 중")
+                    }
+                    is VideoRecordEvent.Finalize -> {
+                        mainHandler.removeCallbacks(autoStopRunnable)
+                        recording = null
+                        isRecordingPaused = false
+                        if (event.hasError()) failure = "녹화 오류 ${event.error}: ${event.cause?.message.orEmpty()}"
+                        if (segmentBytes == 0L || segmentDurationMs == 0L) failure = failure ?: "유효한 영상 데이터가 없습니다"
+                        segmentEntry?.let { com.example.camera2study.util.RecordingJournal.finishSegment(context,
+                            journal, it, segmentDurationMs, segmentBytes, failure, event.outputResults.outputUri.toString()) }
+                        sessionDurationMs += segmentDurationMs
+                        sessionBytes += segmentBytes
+                        segmentDurationMs = 0
+                        segmentBytes = 0
+                        currentRepeatCount++
+                        if (isAutoStopping && !stopRequested && failure == null && !released &&
+                            (sessionFileCount == 0 || currentRepeatCount < sessionFileCount)) {
+                            publish(RecordingPhase.BETWEEN_SEGMENTS, "다음 파일 준비 중")
+                            mainHandler.postDelayed(restartRunnable, 100L)
+                        } else {
+                            finishSession()
+                        }
+                    }
                 }
-
-                // 반복 녹화로 이어지지 않는 진짜 종료 시점에만 service 정리 신호를 보낸다.
                 onRecordingEvent?.invoke(event)
-                if (!willRepeat) {
-                    onFinalizeEnded?.invoke()
-                }
             }
+        } catch (e: Exception) {
+            failure = "녹화 시작 실패: ${e.message}"
+            segmentEntry?.let { com.example.camera2study.util.RecordingJournal.finishSegment(context,
+                journal, it, 0, 0, failure, "") }
+            finishSession()
         }
     }
 
-    fun resetRepeatCount() {
-        currentRepeatCount = 0
+    private fun finishSession() {
+        mainHandler.removeCallbacks(autoStopRunnable)
+        mainHandler.removeCallbacks(restartRunnable)
+        mainHandler.removeCallbacks(healthCheck)
+        stopRequested = true
+        releaseWakeLock()
+        session?.let { com.example.camera2study.util.RecordingJournal.finish(context, it, failure, stopReason) }
+        publish(if (failure == null) RecordingPhase.COMPLETED else RecordingPhase.ERROR, failure ?: "저장 완료")
+        onFinalizeEnded?.invoke()
     }
 
-    private fun currentSegmentDurationMs(): Long =
-        if (maxDurationMs > 0) maxDurationMs else LONG_RECORDING_SEGMENT_MS
-
-    private fun isUnlimitedSegmentSession(): Boolean = maxDurationMs == 0L
+    fun resetRepeatCount() { if (!isRecording()) currentRepeatCount = 0 }
 
     @SuppressLint("InvalidWakeLockTag")
     private fun renewWakeLock(timeoutMs: Long) {
         if (wakeLock == null) {
             val pm = context.getSystemService(Context.POWER_SERVICE) as PowerManager
-            wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "Camera2Study::WakeLock").apply {
-                setReferenceCounted(false)
-            }
-        }
-        if (wakeLock?.isHeld == true) {
-            wakeLock?.release()
+            wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "Camera2Study:recording").apply { setReferenceCounted(false) }
         }
         wakeLock?.acquire(timeoutMs)
     }
 
-    private fun releaseWakeLock() {
-        if (wakeLock?.isHeld == true) {
-            wakeLock?.release()
-        }
-    }
-
-    fun pauseRecording() {
-        if (isRecording() && !isRecordingPaused) {
-            recording?.pause()
-        }
-    }
-
-    fun resumeRecording() {
-        if (isRecording() && isRecordingPaused) {
-            recording?.resume()
-        }
-    }
-
+    private fun releaseWakeLock() { if (wakeLock?.isHeld == true) wakeLock?.release() }
+    fun pauseRecording() { if (recordingState.phase == RecordingPhase.RECORDING) recording?.pause() }
+    fun resumeRecording() { if (isRecordingPaused) recording?.resume() }
     fun isPaused(): Boolean = isRecordingPaused
 
-    fun stopRecording() {
-        // recording = null과 wake lock 해제는 Recording.Finalize callback에서 처리한다.
-        // 여기서 즉시 정리하면 finalize 콜백과 race가 발생해 파일이 손상될 수 있다.
-        recording?.stop()
+    fun stopRecording(reason: String = "user") {
+        if (!isRecording()) return
+        stopReason = reason
+        stopRequested = true
+        mainHandler.removeCallbacks(restartRunnable)
         mainHandler.removeCallbacks(autoStopRunnable)
+        if (recording != null) {
+            publish(RecordingPhase.FINALIZING, "파일 저장 중")
+            recording?.stop()
+        } else finishSession()
     }
 
-    fun isRecording(): Boolean = recording != null
+    fun isRecording(): Boolean = recordingState.active && recordingState.sessionId == session?.optString("id")
 
     fun release() {
+        if (isRecording()) stopRecording("service_destroyed")
         released = true
+        mainHandler.removeCallbacks(restartRunnable)
+        mainHandler.removeCallbacks(autoStopRunnable)
+        mainHandler.removeCallbacks(healthCheck)
         onRecordingEvent = null
         onCameraChanged = null
         onZoomChanged = null
         onError = null
-        recording?.stop()
-        recording = null
-        mainHandler.removeCallbacks(autoStopRunnable)
         releaseWakeLock()
         cameraProvider?.unbindAll()
         camera = null
