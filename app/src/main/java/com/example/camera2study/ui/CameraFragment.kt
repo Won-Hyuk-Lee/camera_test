@@ -42,7 +42,6 @@ class CameraFragment : Fragment() {
     private var isBound = false
     private var manualColorTempK: Int = CameraSettingsStore.DEFAULT_COLOR_TEMP_K
 
-    private var isPhotoMode: Boolean = true // 기본 사진 모드
 
     private var recordStartMs: Long = 0L
     private var pauseStartMs: Long = 0L
@@ -96,12 +95,12 @@ class CameraFragment : Fragment() {
                     }
                 }, 500L)
             } else {
-                // 초기 모드 동기화 (기본 사진모드로 시작하되 녹화 중이면 비디오 동기화)
+                // 서비스의 동영상 상태 복원
                 if (controller.isRecording()) {
                     setVideoModeUi()
                     syncRecordingUi(true)
                 } else {
-                    setPhotoModeUi()
+                    setVideoModeUi()
                 }
             }
 
@@ -165,78 +164,22 @@ class CameraFragment : Fragment() {
             }
         }
 
-        // 모드 탭 리스너
-        binding.txtModePhoto.setOnClickListener {
-            if (::controller.isInitialized && controller.isRecording()) return@setOnClickListener
-            setPhotoModeUi()
-        }
-
-        binding.txtModeVideo.setOnClickListener {
-            if (::controller.isInitialized && controller.isRecording()) return@setOnClickListener
-            setVideoModeUi()
-        }
     }
 
     private fun handleShutterClick() {
         if (!::controller.isInitialized) return
-        if (isPhotoMode) {
-            // 1. 사진 촬영 — 성공 알림 Toast는 띄우지 않는다. 썸네일 갱신으로 피드백 대체.
-            animateShutterClick()
-            controller.takePicture(
-                onSuccess = {
-                    activity?.runOnUiThread { updateThumbnail() }
-                },
-                onError = { e ->
-                    activity?.runOnUiThread {
-                        Toast.makeText(requireContext(), "촬영 실패: ${e.message}", Toast.LENGTH_SHORT).show()
-                    }
-                }
-            )
+        if (controller.isRecording()) {
+            controller.stopRecording()
         } else {
-            // 2. 동영상 녹화 토글
-            if (controller.isRecording()) {
-                controller.stopRecording()
-            } else {
-                controller.resetRepeatCount()
-                // 녹화 시작 시점에만 foreground service를 격상시킨다. 비녹화 시 service가 남지 않게 한다.
-                CameraForegroundService.requestStartRecording(requireContext())
-                controller.startRecording()
-            }
+            controller.resetRepeatCount()
+            CameraForegroundService.requestStartRecording(requireContext())
+            controller.startRecording()
         }
-    }
-
-    private fun animateShutterClick() {
-        val animation = ScaleAnimation(
-            1.0f, 0.85f, 1.0f, 0.85f,
-            ScaleAnimation.RELATIVE_TO_SELF, 0.5f,
-            ScaleAnimation.RELATIVE_TO_SELF, 0.5f
-        ).apply {
-            duration = 100
-            repeatCount = 1
-            repeatMode = ScaleAnimation.REVERSE
-        }
-        binding.shutterCenter.startAnimation(animation)
-    }
-
-    private fun setPhotoModeUi() {
-        isPhotoMode = true
-        if (::controller.isInitialized) controller.isVideoMode = false
-        binding.txtModePhoto.setTextColor(Color.parseColor("#FFC107"))
-        binding.txtModeVideo.setTextColor(Color.parseColor("#8AFFFFFF"))
-
-        binding.shutterCenter.setBackgroundResource(R.drawable.shutter_center_photo)
-
-        binding.txtTimer.visibility = View.INVISIBLE
     }
 
     private fun setVideoModeUi() {
-        isPhotoMode = false
-        if (::controller.isInitialized) controller.isVideoMode = true
-        binding.txtModePhoto.setTextColor(Color.parseColor("#8AFFFFFF"))
         binding.txtModeVideo.setTextColor(Color.parseColor("#FFC107"))
-
         binding.shutterCenter.setBackgroundResource(R.drawable.shutter_center_video)
-
         binding.txtTimer.visibility = View.VISIBLE
     }
 

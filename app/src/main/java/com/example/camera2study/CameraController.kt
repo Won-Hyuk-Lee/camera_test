@@ -18,8 +18,6 @@ import androidx.camera.core.resolutionselector.AspectRatioStrategy
 import androidx.camera.core.resolutionselector.ResolutionSelector
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.FocusMeteringAction
-import androidx.camera.core.ImageCapture
-import androidx.camera.core.ImageCaptureException
 import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.video.FileOutputOptions
@@ -55,7 +53,6 @@ class CameraController(private val context: Context) {
     private var wakeLock: PowerManager.WakeLock? = null
     private var previewUseCase: Preview? = null
     private var videoCapture: VideoCapture<Recorder>? = null
-    private var imageCapture: ImageCapture? = null
     private var recording: Recording? = null
 
     private var lifecycleOwner: LifecycleOwner? = null
@@ -156,15 +153,6 @@ class CameraController(private val context: Context) {
     var onZoomChanged: ((Float, Float) -> Unit)? = null // current, max
     var onFinalizeEnded: (() -> Unit)? = null
 
-    // 사진/영상 모드 분리. 자동 모드의 AF mode 결정에 사용한다.
-    var isVideoMode: Boolean = false
-        set(value) {
-            if (field != value) {
-                field = value
-                applyOptionsLive()
-            }
-        }
-
     val backLenses: List<LensInfo> by lazy { CameraUtils.listBackLenses(context) }
 
     fun init(
@@ -238,14 +226,7 @@ class CameraController(private val context: Context) {
             preview.setSurfaceProvider(it.surfaceProvider)
         }
 
-        // 2. ImageCapture (사진 촬영)
-        val imageCaptureBuilder = ImageCapture.Builder()
-            .setResolutionSelector(resolutionSelector)
-            .setTargetRotation(displayRotation)
-            .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
-        imageCapture = imageCaptureBuilder.build()
-
-        // 3. VideoCapture
+        // VideoCapture
         val recorder = Recorder.Builder()
             .setQualitySelector(QualitySelector.from(videoQuality))
             .build()
@@ -265,7 +246,7 @@ class CameraController(private val context: Context) {
 
         val selector = buildSelector()
         try {
-            camera = provider.bindToLifecycle(owner, selector, preview, imageCapture, videoUseCase)
+            camera = provider.bindToLifecycle(owner, selector, preview, videoUseCase)
             videoCapture = videoUseCase
 
             applyOptionsLive()
@@ -334,13 +315,7 @@ class CameraController(private val context: Context) {
             builder.setCaptureRequestOption(CaptureRequest.LENS_APERTURE, it)
         }
 
-        // 사진 모드는 CONTINUOUS_PICTURE, 영상 모드는 CONTINUOUS_VIDEO로 분기한다.
-        val afMode = if (isVideoMode) {
-            CameraMetadata.CONTROL_AF_MODE_CONTINUOUS_VIDEO
-        } else {
-            CameraMetadata.CONTROL_AF_MODE_CONTINUOUS_PICTURE
-        }
-        builder.setCaptureRequestOption(CaptureRequest.CONTROL_AF_MODE, afMode)
+        builder.setCaptureRequestOption(CaptureRequest.CONTROL_AF_MODE, CameraMetadata.CONTROL_AF_MODE_CONTINUOUS_VIDEO)
 
         // 노출 자동 보정 및 안티밴딩
         if (expNs == null) {
@@ -522,53 +497,6 @@ class CameraController(private val context: Context) {
     }
 
 
-    // --- 사진 촬영 (Take Picture) ---
-    fun takePicture(onSuccess: (File) -> Unit, onError: (ImageCaptureException) -> Unit) {
-        val ic = imageCapture ?: return
-
-        val name = "StudyVault_${System.currentTimeMillis()}.jpg"
-        val outputFileOptions = if (isPrivateSave) {
-            val privateDir = File(context.getExternalFilesDir(null), "private_vault")
-            if (!privateDir.exists()) privateDir.mkdirs()
-            val nomedia = File(privateDir, ".nomedia")
-            if (!nomedia.exists()) nomedia.createNewFile()
-            
-            val file = File(privateDir, name)
-            ImageCapture.OutputFileOptions.Builder(file).build()
-        } else {
-            val values = ContentValues().apply {
-                put(MediaStore.MediaColumns.DISPLAY_NAME, name)
-                put(MediaStore.MediaColumns.MIME_TYPE, "image/jpeg")
-                put(MediaStore.Images.Media.RELATIVE_PATH, "DCIM/StudyVault")
-            }
-            ImageCapture.OutputFileOptions.Builder(
-                context.contentResolver,
-                MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
-                values
-            ).build()
-        }
-
-        ic.takePicture(
-            outputFileOptions,
-            ContextCompat.getMainExecutor(context),
-            object : ImageCapture.OnImageSavedCallback {
-                override fun onImageSaved(outputFileResults: ImageCapture.OutputFileResults) {
-                    val savedFile = if (isPrivateSave) {
-                        File(File(context.getExternalFilesDir(null), "private_vault"), name)
-                    } else {
-                        // 공용 갤러리는 임시 File 혹은 URI 정보 제공
-                        File("")
-                    }
-                    onSuccess(savedFile)
-                }
-
-                override fun onError(exception: ImageCaptureException) {
-                    onError(exception)
-                }
-            }
-        )
-    }
-
     // --- 동영상 녹화 (Start Recording) ---
     @SuppressLint("MissingPermission", "InvalidWakeLockTag")
     fun startRecording() {
@@ -735,6 +663,5 @@ class CameraController(private val context: Context) {
         cameraProvider?.unbindAll()
         camera = null
         videoCapture = null
-        imageCapture = null
     }
 }

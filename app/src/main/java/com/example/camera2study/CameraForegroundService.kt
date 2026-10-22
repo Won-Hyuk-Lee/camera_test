@@ -171,7 +171,6 @@ class CameraForegroundService : LifecycleService() {
 
         val settings = CameraSettingsStore.load(applicationContext)
         CameraSettingsStore.applyToController(controller, settings)
-        controller.isVideoMode = true
         controller.resetRepeatCount()
         startBackgroundRecording()
     }
