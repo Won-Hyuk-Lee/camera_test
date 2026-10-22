@@ -122,6 +122,7 @@
 
         <com.google.android.material.button.MaterialButton
             android:id="@+id/btnRatio34"
+            android:visibility="gone"
             style="@style/Widget.Material3.Button.TextButton"
             android:layout_width="54dp"
             android:layout_height="36dp"

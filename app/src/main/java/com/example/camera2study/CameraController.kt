@@ -48,6 +48,24 @@ class CameraController(private val context: Context) {
         private const val WAKE_LOCK_GRACE_MS = 60 * 1000L
     }
 
+    private var sensedRotation = android.view.Surface.ROTATION_0
+    private val orientationListener = object : android.view.OrientationEventListener(context) {
+        override fun onOrientationChanged(angle: Int) {
+            if (angle == ORIENTATION_UNKNOWN) return
+            sensedRotation = when (angle) {
+                in 45..134 -> android.view.Surface.ROTATION_270
+                in 135..224 -> android.view.Surface.ROTATION_180
+                in 225..314 -> android.view.Surface.ROTATION_90
+                else -> android.view.Surface.ROTATION_0
+            }
+            if (!isRecording()) videoCapture?.targetRotation = outputRotation()
+        }
+    }
+    private fun outputRotation(): Int = when (orientationMode) {
+        "LANDSCAPE" -> if (sensedRotation == android.view.Surface.ROTATION_270) sensedRotation else android.view.Surface.ROTATION_90
+        "PORTRAIT" -> if (sensedRotation == android.view.Surface.ROTATION_180) sensedRotation else android.view.Surface.ROTATION_0
+        else -> sensedRotation
+    }
     private var released = false
     private var configuring = false
     var lastError: String? = null
@@ -184,6 +202,7 @@ class CameraController(private val context: Context) {
         onReady: () -> Unit = {}
     ) {
         lifecycleOwner = owner
+        if (orientationListener.canDetectOrientation()) orientationListener.enable()
         val future = ProcessCameraProvider.getInstance(context)
         future.addListener({
             if (released) return@addListener
@@ -208,7 +227,7 @@ class CameraController(private val context: Context) {
             return
         }
         try {
-            val preview = Preview.Builder().setTargetRotation(view.display?.rotation ?: 0).build()
+            val preview = Preview.Builder().setTargetRotation(view.display?.rotation ?: android.view.Surface.ROTATION_0).build()
             preview.setSurfaceProvider(view.surfaceProvider)
             camera = provider.bindToLifecycle(owner, buildSelector(), video, preview)
             previewUseCase = preview
@@ -241,67 +260,31 @@ class CameraController(private val context: Context) {
         videoCapture = null
         previewUseCase = null
 
-        // 1. 화면 비율 결정 — 3:4는 4:3 sensor, 16:9 / Full은 16:9 sensor 출력으로 통일한다.
-        // Full은 디스플레이 비율로 preview를 채우되 저장 결과는 16:9로 둬 Galaxy 기본 동작과 일치시킨다.
-        val aspectRatioStrategy = when (currentRatioMode) {
-            RATIO_3_4 -> AspectRatioStrategy.RATIO_4_3_FALLBACK_AUTO_STRATEGY
-            else -> AspectRatioStrategy.RATIO_16_9_FALLBACK_AUTO_STRATEGY
-        }
-        val resolutionSelector = ResolutionSelector.Builder()
-            .setAspectRatioStrategy(aspectRatioStrategy)
-            .build()
-
-        // 현재 디스플레이 회전 정보. 액티비티가 portrait 고정이지만 명시적으로 use case에 주입한다.
-        val displayRotation = previewView?.display?.rotation
-            ?: android.view.Surface.ROTATION_0
-
-        // Preview 빌더 — 가능하면 FPS 힌트를 capture request에 주입한다.
-        val previewBuilder = Preview.Builder()
-            .setResolutionSelector(resolutionSelector)
-            .setTargetRotation(displayRotation)
         try {
-            androidx.camera.camera2.interop.Camera2Interop.Extender(previewBuilder)
-                .setCaptureRequestOption(
-                    android.hardware.camera2.CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE,
-                    android.util.Range(targetFps, targetFps)
-                )
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
-        val preview = previewBuilder.build()
-
-        previewView?.let {
-            preview.setSurfaceProvider(it.surfaceProvider)
-        }
-
-        // VideoCapture
-        val recorder = Recorder.Builder()
-            .setQualitySelector(QualitySelector.from(videoQuality))
-            .build()
-        val videoUseCaseBuilder = VideoCapture.Builder(recorder)
-            .setTargetRotation(displayRotation)
-        if (isHdrEnabled) {
-            // HDR 10-bit 지원 단말에서만 적용된다. 미지원이면 CameraX가 fallback 처리한다.
-            try {
-                videoUseCaseBuilder.setDynamicRange(
-                    androidx.camera.core.DynamicRange.HDR_UNSPECIFIED_10_BIT
-                )
-            } catch (e: Exception) {
-                e.printStackTrace()
-            }
-        }
-        val videoUseCase = videoUseCaseBuilder.build()
-
-        val selector = buildSelector()
-        try {
-            camera = if (previewView?.isAttachedToWindow == true) {
-                previewUseCase = preview
-                provider.bindToLifecycle(owner, selector, preview, videoUseCase)
-            } else {
-                provider.bindToLifecycle(owner, selector, videoUseCase)
-            }
+            val selector = buildSelector()
+            val info = selector.filter(provider.availableCameraInfos).firstOrNull()
+                ?: error("선택한 카메라가 공개되지 않았습니다")
+            val capabilities = Recorder.getVideoCapabilities(info)
+            val dynamicRange = if (isHdrEnabled) capabilities.supportedDynamicRanges.firstOrNull {
+                it != androidx.camera.core.DynamicRange.SDR && it.bitDepth == androidx.camera.core.DynamicRange.BIT_DEPTH_10_BIT
+            } ?: error("선택한 카메라는 HDR 녹화를 지원하지 않습니다") else androidx.camera.core.DynamicRange.SDR
+            check(videoQuality in capabilities.getSupportedQualities(dynamicRange)) { "선택한 화질/HDR 조합은 지원하지 않습니다. 촬영 설정을 변경하세요" }
+            check(info.supportedFrameRateRanges.any { it.contains(targetFps) }) { "선택한 FPS는 지원하지 않습니다" }
+            val recorder = Recorder.Builder().setQualitySelector(QualitySelector.from(videoQuality))
+                .setAspectRatio(androidx.camera.core.AspectRatio.RATIO_16_9).build()
+            val video = VideoCapture.Builder(recorder).setTargetRotation(outputRotation())
+                .setTargetFrameRate(android.util.Range(targetFps, targetFps))
+                .setDynamicRange(dynamicRange)
+                .setMirrorMode(if (mirrorFront) androidx.camera.core.MirrorMode.MIRROR_MODE_ON_FRONT_ONLY else androidx.camera.core.MirrorMode.MIRROR_MODE_OFF)
+                .build()
+            val preview = if (previewView?.isAttachedToWindow == true) Preview.Builder()
+                .setTargetRotation(previewView?.display?.rotation ?: android.view.Surface.ROTATION_0)
+                .setDynamicRange(dynamicRange).build().also { it.setSurfaceProvider(previewView!!.surfaceProvider) } else null
+            camera = if (preview != null) provider.bindToLifecycle(owner, selector, preview, video)
+                else provider.bindToLifecycle(owner, selector, video)
+            previewUseCase = preview
+            videoCapture = video
             lastError = null
-            videoCapture = videoUseCase
 
             applyOptionsLive()
             applyPendingZoomAfterBind()
@@ -351,13 +334,21 @@ class CameraController(private val context: Context) {
         }
 
         // 수동 노출
-        val expNs = exposureTimeNs
+        val info = Camera2CameraInfo.from(cam.cameraInfo)
+        val manualSupported = info.getCameraCharacteristic(android.hardware.camera2.CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES)
+            ?.contains(android.hardware.camera2.CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_MANUAL_SENSOR) == true
+        val range = info.getCameraCharacteristic(android.hardware.camera2.CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE)
+        val expNs = exposureTimeNs?.takeIf { manualSupported && isProMode }?.coerceIn(range?.lower ?: 1L,
+            minOf(range?.upper ?: Long.MAX_VALUE, 1_000_000_000L / targetFps))
         if (expNs != null) {
             builder.setCaptureRequestOption(
                 CaptureRequest.CONTROL_AE_MODE,
                 CameraMetadata.CONTROL_AE_MODE_OFF
             )
             builder.setCaptureRequestOption(CaptureRequest.SENSOR_EXPOSURE_TIME, expNs)
+            val sensitivity = info.getCameraCharacteristic(android.hardware.camera2.CameraCharacteristics.SENSOR_INFO_SENSITIVITY_RANGE)
+            if (sensitivity != null) builder.setCaptureRequestOption(CaptureRequest.SENSOR_SENSITIVITY, 200.coerceIn(sensitivity.lower, sensitivity.upper))
+            builder.setCaptureRequestOption(CaptureRequest.SENSOR_FRAME_DURATION, 1_000_000_000L / targetFps)
         } else {
             builder.setCaptureRequestOption(
                 CaptureRequest.CONTROL_AE_MODE,
@@ -380,7 +371,10 @@ class CameraController(private val context: Context) {
             )
         }
 
-        control.setCaptureRequestOptions(builder.build())
+        val future = control.setCaptureRequestOptions(builder.build())
+        future.addListener({
+            if (cam === camera && !released) runCatching { future.get() }.onFailure { reportError("수동 설정 적용 실패: ${it.message}") }
+        }, ContextCompat.getMainExecutor(context))
     }
 
     private fun nativeMin(): Float = camera?.cameraInfo?.zoomState?.value?.minZoomRatio ?: 1f
@@ -602,6 +596,12 @@ class CameraController(private val context: Context) {
         override fun run() {
             if (!isRecording() || released) return
             val now = android.os.SystemClock.elapsedRealtime()
+            if (recordingState.phase != RecordingPhase.FINALIZING) {
+                com.example.camera2study.util.CaptureHealth.problem(context, audioEnabled, false)?.let {
+                    failure = it
+                    stopRecording("resource_error")
+                }
+            }
             when (recordingState.phase) {
                 RecordingPhase.PREPARING, RecordingPhase.RECORDING -> {
                     if (now - lastProgressAt > 15_000L) {
@@ -636,6 +636,13 @@ class CameraController(private val context: Context) {
         sessionDurationMs = 0
         sessionBytes = 0
         sessionPlan = RecordingPlan(maxDurationMs.coerceAtLeast(1_000L), maxRepeatCount.coerceAtLeast(0), totalDurationMs.coerceAtLeast(0))
+        val problem = com.example.camera2study.util.CaptureHealth.problem(context, audioEnabled, true)
+        if (problem != null || (!isPrivateSave && android.os.Build.VERSION.SDK_INT < 29)) {
+            failure = problem ?: "공개 갤러리 저장은 Android 10 이상에서 지원합니다"
+            finishSession()
+            return
+        }
+        videoCapture?.targetRotation = outputRotation()
         startSegment()
     }
 
@@ -759,7 +766,13 @@ class CameraController(private val context: Context) {
         mainHandler.removeCallbacks(healthCheck)
         stopRequested = true
         releaseWakeLock()
-        session?.let { com.example.camera2study.util.RecordingJournal.finish(context, it, failure, stopReason) }
+        session?.let { journal ->
+            segmentEntry?.takeIf { it.optString("status") == "RECORDING" }?.let {
+                com.example.camera2study.util.RecordingJournal.finishSegment(context, journal, it,
+                    segmentDurationMs, segmentBytes, failure ?: "저장 완료 확인 필요", "")
+            }
+            com.example.camera2study.util.RecordingJournal.finish(context, journal, failure, stopReason)
+        }
         publish(if (failure == null) RecordingPhase.COMPLETED else RecordingPhase.ERROR, failure ?: "저장 완료")
         onFinalizeEnded?.invoke()
     }
@@ -797,6 +810,7 @@ class CameraController(private val context: Context) {
     fun release() {
         if (isRecording()) stopRecording("service_destroyed")
         released = true
+        orientationListener.disable()
         mainHandler.removeCallbacks(restartRunnable)
         mainHandler.removeCallbacks(autoStopRunnable)
         mainHandler.removeCallbacks(healthCheck)

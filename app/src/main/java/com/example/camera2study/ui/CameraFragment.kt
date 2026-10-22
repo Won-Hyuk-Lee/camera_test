@@ -50,9 +50,6 @@ class CameraFragment : Fragment() {
             val binding = _binding ?: return
             if (!::controller.isInitialized) return
             val elapsed = controller.recordingState.durationMs
-            val repeatStr = if (controller.maxRepeatCount > 1) {
-                " [${controller.currentRepeatCount + 1}/${controller.maxRepeatCount}]"
-            } else ""
             binding.txtTimer.text = formatElapsed(elapsed) + " · " + controller.recordingState.message
             binding.txtTimer.postDelayed(this, 200L)
         }
@@ -220,7 +217,6 @@ class CameraFragment : Fragment() {
     private fun setupZoomListeners() {
         if (!::controller.isInitialized) return
 
-        val min = controller.getMinZoomRatio()
         val max = controller.getMaxZoomRatio()
 
         zoomPresets.forEach { preset ->
@@ -418,10 +414,10 @@ class CameraFragment : Fragment() {
     private fun syncRecordingUi(isRecording: Boolean) {
         val binding = _binding ?: return
         if (isRecording) {
-            recordStartMs = SystemClock.elapsedRealtime()
+            binding.txtTimer.removeCallbacks(timerRunnable)
             binding.txtTimer.post(timerRunnable)
             binding.btnPauseResume.visibility = View.VISIBLE
-            binding.btnPauseResume.text = "⏸ 일시정지"
+            binding.btnPauseResume.text = if (controller.isPaused()) "▶ 재개" else "⏸ 일시정지"
 
             val animation = ScaleAnimation(
                 1.0f, 0.6f, 1.0f, 0.6f,
@@ -466,7 +462,7 @@ class CameraFragment : Fragment() {
                 val pausedDuration = SystemClock.elapsedRealtime() - pauseStartMs
                 recordStartMs += pausedDuration
                 binding.txtTimer.post(timerRunnable)
-                binding.btnPauseResume.text = "⏸ 일시정지"
+                binding.btnPauseResume.text = if (controller.isPaused()) "▶ 재개" else "⏸ 일시정지"
             }
             is VideoRecordEvent.Finalize -> {
                 if (!controller.isRecording()) {

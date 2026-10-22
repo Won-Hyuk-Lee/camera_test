@@ -43,7 +43,7 @@ class HomeFragment : Fragment() {
         }
 
         binding.cardFastRecord.setOnClickListener {
-            if (PermissionHelper.allGranted(requireContext())) {
+            if (PermissionHelper.allGranted(requireContext(), com.example.camera2study.util.CameraSettingsStore.load(requireContext(), true).audioEnabled)) {
                 com.example.camera2study.CameraForegroundService.requestQuickRecording(requireContext())
                 Toast.makeText(requireContext(), "빠른 녹화를 요청했습니다. 알림에서 상태를 확인하세요", Toast.LENGTH_LONG).show()
             } else {
