@@ -33,8 +33,9 @@ object CameraSettingsStore {
         val zoomModeRatio: Float = 1.0f,
         val ratioMode: Int = CameraController.RATIO_3_4,
         val quality: Quality = Quality.HD,
-        val maxDurationMs: Long = 0L,
-        val maxRepeatCount: Int = 1,
+        val maxDurationMs: Long = 1_800_000L,
+        val maxRepeatCount: Int = 0,
+        val totalDurationMs: Long = 0L,
         val fps: Int = 30,
         val hdrEnabled: Boolean = false,
         val proMode: Boolean = false,
@@ -54,8 +55,9 @@ object CameraSettingsStore {
             zoomModeRatio = pref.getFloat(KEY_ZOOM_MODE, 1.0f),
             ratioMode = pref.getInt(KEY_RATIO_MODE, CameraController.RATIO_3_4),
             quality = qualityFromName(pref.getString(KEY_QUALITY, null)),
-            maxDurationMs = pref.getLong(KEY_MAX_DURATION_MS, 0L),
-            maxRepeatCount = pref.getInt(KEY_MAX_REPEAT_COUNT, 1),
+            maxDurationMs = pref.getLong(KEY_MAX_DURATION_MS, 0L).takeIf { it > 0 } ?: 1_800_000L,
+            maxRepeatCount = if (pref.getLong(KEY_MAX_DURATION_MS, 0L) == 0L) 0 else pref.getInt(KEY_MAX_REPEAT_COUNT, 0).takeIf { it in 0..998 } ?: 0,
+            totalDurationMs = pref.getLong("total_duration_ms", 0L),
             fps = pref.getInt(KEY_FPS, 30),
             hdrEnabled = pref.getBoolean(KEY_HDR, false),
             proMode = pref.getBoolean(KEY_PRO_MODE, false),
@@ -76,6 +78,7 @@ object CameraSettingsStore {
             .putString(KEY_QUALITY, qualityToName(settings.quality))
             .putLong(KEY_MAX_DURATION_MS, settings.maxDurationMs)
             .putInt(KEY_MAX_REPEAT_COUNT, settings.maxRepeatCount)
+            .putLong("total_duration_ms", settings.totalDurationMs)
             .putInt(KEY_FPS, settings.fps)
             .putBoolean(KEY_HDR, settings.hdrEnabled)
             .putBoolean(KEY_PRO_MODE, settings.proMode)
@@ -96,6 +99,7 @@ object CameraSettingsStore {
             quality = controller.videoQuality,
             maxDurationMs = controller.maxDurationMs,
             maxRepeatCount = controller.maxRepeatCount,
+            totalDurationMs = controller.totalDurationMs,
             fps = controller.targetFps,
             hdrEnabled = controller.isHdrEnabled,
             proMode = controller.isProMode,
@@ -110,6 +114,7 @@ object CameraSettingsStore {
         controller.videoQuality = settings.quality
         controller.maxDurationMs = settings.maxDurationMs
         controller.maxRepeatCount = settings.maxRepeatCount
+        controller.totalDurationMs = settings.totalDurationMs
         controller.targetFps = settings.fps
         controller.isHdrEnabled = settings.hdrEnabled
         controller.isProMode = settings.proMode

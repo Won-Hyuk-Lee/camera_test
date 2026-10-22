@@ -156,7 +156,7 @@
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="녹화 세그먼트 길이"
+            android:text="파일당 길이"
             android:textStyle="bold"
             android:paddingTop="12dp" />
 
@@ -169,7 +169,7 @@
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="세그먼트 반복 횟수"
+            android:text="전체 파일 수 (직접 종료 가능)"
             android:textStyle="bold"
             android:paddingTop="12dp" />
 

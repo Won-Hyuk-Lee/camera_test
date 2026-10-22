@@ -97,8 +97,9 @@ class CameraController(private val context: Context) {
             }
         }
 
-    var maxDurationMs: Long = 0L // 0이면 30분 파일 단위로 무제한 이어 찍기
-    var maxRepeatCount: Int = 1  // 기본 1회 (반복 없음)
+    var maxDurationMs: Long = 1_800_000L // 파일당 최대 길이
+    var maxRepeatCount: Int = 0 // 0이면 직접 종료
+    var totalDurationMs: Long = 0
     var currentRepeatCount: Int = 0
         private set
 
@@ -557,7 +558,7 @@ class CameraController(private val context: Context) {
     private var lastJournalAt = 0L
     private var phaseSince = 0L
     private var sessionSegmentMs = LONG_RECORDING_SEGMENT_MS
-    private var sessionFileCount = 0
+    private var sessionPlan = RecordingPlan(LONG_RECORDING_SEGMENT_MS)
     private val restartRunnable = Runnable { if (!stopRequested && !released) startSegment() }
     val recordingState: RecordingState get() = RecordingRuntime.state.value ?: RecordingState()
 
@@ -605,8 +606,7 @@ class CameraController(private val context: Context) {
         currentRepeatCount = 0
         sessionDurationMs = 0
         sessionBytes = 0
-        sessionSegmentMs = if (maxDurationMs > 0) maxDurationMs else LONG_RECORDING_SEGMENT_MS
-        sessionFileCount = if (maxDurationMs == 0L || maxRepeatCount >= 999) 0 else maxRepeatCount.coerceAtLeast(1)
+        sessionPlan = RecordingPlan(maxDurationMs.coerceAtLeast(1_000L), maxRepeatCount.coerceAtLeast(0), totalDurationMs.coerceAtLeast(0))
         startSegment()
     }
 
@@ -614,6 +614,8 @@ class CameraController(private val context: Context) {
     private fun startSegment() {
         if (released || stopRequested) return
         val journal = session ?: return
+        sessionSegmentMs = sessionPlan.nextDuration(sessionDurationMs)
+        if (sessionSegmentMs <= 0) { finishSession(); return }
         segmentDurationMs = 0
         segmentBytes = 0
         segmentEntry = null
@@ -666,7 +668,7 @@ class CameraController(private val context: Context) {
                         mainHandler.postDelayed(autoStopRunnable, sessionSegmentMs)
                     }
                     is VideoRecordEvent.Status -> {
-                        if (!stopRequested && !isRecordingPaused && segmentBytes > 0 && segmentDurationMs > 0) {
+                        if (!stopRequested && !isAutoStopping && !isRecordingPaused && segmentBytes > 0 && segmentDurationMs > 0) {
                             publish(RecordingPhase.RECORDING, "녹화 중")
                         }
                         val now = android.os.SystemClock.elapsedRealtime()
@@ -704,7 +706,7 @@ class CameraController(private val context: Context) {
                         segmentBytes = 0
                         currentRepeatCount++
                         if (isAutoStopping && !stopRequested && failure == null && !released &&
-                            (sessionFileCount == 0 || currentRepeatCount < sessionFileCount)) {
+                            sessionPlan.continues(currentRepeatCount, sessionDurationMs)) {
                             publish(RecordingPhase.BETWEEN_SEGMENTS, "다음 파일 준비 중")
                             mainHandler.postDelayed(restartRunnable, 100L)
                         } else {

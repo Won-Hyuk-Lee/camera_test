@@ -65,7 +65,8 @@ class SettingsBottomSheet : BottomSheetDialogFragment() {
     )
 
     private val durationOptions = listOf(
-        "제한 없음 (30분 단위)" to 0L,
+        "5분" to 300_000L,
+        "10분" to 600_000L,
         "10초 (테스트)" to 10_000L,
         "30분" to 1_800_000L
     )
@@ -75,7 +76,7 @@ class SettingsBottomSheet : BottomSheetDialogFragment() {
         "2회" to 2,
         "4회" to 4,
         "8회" to 8,
-        "무한 반복" to 999
+        "직접 종료할 때까지" to 0
     )
 
     private val fpsOptions = listOf(

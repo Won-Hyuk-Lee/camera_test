@@ -43,6 +43,7 @@ android {
 }
 
 dependencies {
+    testImplementation("junit:junit:4.13.2")
     val cameraxVersion = "1.4.2"
 
     implementation("androidx.core:core-ktx:1.13.1")
