@@ -30,7 +30,13 @@ class RecordingSettingsFragment : Fragment() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        draft = CameraSettingsStore.load(requireContext(), quick)
+        draft = savedInstanceState?.getBundle("draft")?.let(CameraSettingsStore::fromBundle)
+            ?: CameraSettingsStore.load(requireContext(), quick)
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        outState.putBundle("draft", CameraSettingsStore.toBundle(draft))
+        super.onSaveInstanceState(outState)
     }
 
     override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, state: Bundle?): View {
@@ -99,6 +105,8 @@ class RecordingSettingsFragment : Fragment() {
 
     private fun render() {
         val container = list ?: return
+        val scroll = container.parent as? ScrollView
+        val scrollY = scroll?.scrollY ?: 0
         container.removeAllViews()
         button("뒤로") { parentFragmentManager.popBackStack() }
         label(if (quick) "빠른 녹화 전용 설정" else "동영상 촬영 설정")
@@ -123,6 +131,7 @@ class RecordingSettingsFragment : Fragment() {
         val min = zoom?.minZoomRatio ?: 1f
         val max = zoom?.maxZoomRatio ?: 1f
         val zoomValues = (listOf(min, 1f, 2f, 3f, 5f, 10f, max, draft.zoomRatio).filter { it in min..max }).distinct().sorted()
+        draft = draft.copy(zoomRatio = draft.zoomRatio.coerceIn(min, max))
         choice("배율 · 선택한 렌즈 기준", zoomValues.map { "%.2f×".format(it) to it }, draft.zoomRatio.coerceIn(min, max)) {
             draft = draft.copy(zoomRatio = it, zoomModeRatio = it)
         }
@@ -142,7 +151,7 @@ class RecordingSettingsFragment : Fragment() {
         choice("영상 품질", qualities.map { qualityName(it) to it }, draft.quality) { draft = draft.copy(quality = it) }
         val rates = listOf(30, 60).filter { fps -> info.supportedFrameRateRanges.any { it.contains(fps) } }.ifEmpty { listOf(30) }
         if (draft.fps !in rates) draft = draft.copy(fps = rates.first())
-        choice("프레임 속도", rates.map { "$it FPS" to it }, draft.fps) { draft = draft.copy(fps = it) }
+        choice("프레임 속도", rates.map { "$it FPS" to it }, draft.fps) { draft = draft.copy(fps = it); render() }
         val exposure = info.exposureState
         val step = exposure.exposureCompensationStep.toFloat()
         val evs = if (exposure.isExposureCompensationSupported && step > 0) (exposure.exposureCompensationRange.lower..exposure.exposureCompensationRange.upper).map { it * step } else listOf(0f)
@@ -153,6 +162,7 @@ class RecordingSettingsFragment : Fragment() {
         toggle("비공개 보관함에 저장", draft.privateSave) { draft = draft.copy(privateSave = it) }
         toggle("전면 저장 영상 좌우 반전", draft.mirrorFront) { draft = draft.copy(mirrorFront = it) }
         choice("저장 영상 방향", listOf("시작 시 기기 방향" to "AUTO", "가로" to "LANDSCAPE", "세로" to "PORTRAIT"), draft.orientation) { draft = draft.copy(orientation = it) }
+        manualControls(info)
         choice("파일당 길이", listOf("10초 · 시험용" to 10_000L, "5분" to 300_000L, "10분" to 600_000L, "30분" to 1_800_000L), draft.maxDurationMs) { draft = draft.copy(maxDurationMs = it) }
         val ending = if (draft.totalDurationMs > 0) "TIME" else if (draft.maxRepeatCount > 0) "FILES" else "MANUAL"
         choice("전체 종료 조건", listOf("직접 중지" to "MANUAL", "총 파일 수" to "FILES", "총 녹화 시간" to "TIME"), ending) {
@@ -161,6 +171,7 @@ class RecordingSettingsFragment : Fragment() {
         }
         if (ending == "FILES") choice("총 파일 수", listOf(1, 2, 4, 8).map { "$it 개" to it }, draft.maxRepeatCount) { draft = draft.copy(maxRepeatCount = it) }
         if (ending == "TIME") choice("총 녹화 시간", listOf("20초 · 시험용" to 20_000L, "30분" to 1_800_000L, "60분" to 3_600_000L, "120분" to 7_200_000L), draft.totalDurationMs) { draft = draft.copy(totalDurationMs = it) }
+        if (ending == "TIME") label("분할 후 남은 시간이 1초 미만이면 짧은 파일을 추가하지 않고 종료합니다.")
         button("설정 저장") {
             CameraSettingsStore.save(requireContext(), draft, quick)
             toast("설정을 저장했습니다. 다음 촬영부터 적용됩니다")
@@ -170,6 +181,43 @@ class RecordingSettingsFragment : Fragment() {
             CameraForegroundService.requestQuickRecording(requireContext(), test = true)
             toast("10초 시험 촬영을 요청했습니다. 촬영 결과에서 확인하세요")
         }
+        scroll?.post { if (list === container) scroll.scrollTo(0, scrollY) }
+    }
+
+    private fun manualControls(info: CameraInfo) {
+        val chars = Camera2CameraInfo.from(info)
+        val capabilities = chars.getCameraCharacteristic(android.hardware.camera2.CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES) ?: intArrayOf()
+        val sensor = capabilities.contains(android.hardware.camera2.CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_MANUAL_SENSOR)
+        val post = capabilities.contains(android.hardware.camera2.CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_MANUAL_POST_PROCESSING)
+        toggle("수동 화이트밸런스·셔터", draft.proMode) {
+            draft = if (it) draft.copy(proMode = true) else draft.copy(proMode = false,
+                awbMode = android.hardware.camera2.CameraMetadata.CONTROL_AWB_MODE_AUTO, exposureTimeNs = null, aperture = null)
+            render()
+        }
+        if (!draft.proMode) return
+        val awbModes = chars.getCameraCharacteristic(android.hardware.camera2.CameraCharacteristics.CONTROL_AWB_AVAILABLE_MODES) ?: intArrayOf()
+        val awbOptions = listOf("자동" to 1, "백열등" to 2, "형광등" to 3, "태양광" to 5, "흐림" to 6,
+            "색온도 직접 설정" to 0).filter { it.second in awbModes && (it.second != 0 || post) }.ifEmpty { listOf("자동" to 1) }
+        if (draft.awbMode !in awbOptions.map { it.second }) draft = draft.copy(awbMode = 1)
+        choice("화이트밸런스", awbOptions, draft.awbMode) { draft = draft.copy(awbMode = it); render() }
+        if (draft.awbMode == 0) {
+            label("색온도는 센서별 보정 차이가 있는 근사값입니다. 시험 영상으로 색을 확인하세요.")
+            choice("색온도", (3000..8000 step 500).map { "$it K" to it }, draft.colorTempK) { draft = draft.copy(colorTempK = it) }
+        }
+        val range = chars.getCameraCharacteristic(android.hardware.camera2.CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE)
+        if (sensor && range != null) {
+            val shutter = listOf("자동" to null) + listOf(30, 60, 120, 250, 500, 1000).map { "1/$it 초" to (1_000_000_000L / it) }
+                .filter { it.second in range.lower..minOf(range.upper, 1_000_000_000L / draft.fps) }
+            if (draft.exposureTimeNs !in shutter.map { it.second }) draft = draft.copy(exposureTimeNs = null)
+            choice("셔터 · 수동 시 ISO 200 기준", shutter, draft.exposureTimeNs) { draft = draft.copy(exposureTimeNs = it) }
+            label("수동 셔터에서는 밝기 보정 대신 셔터로 밝기를 조절합니다. ISO는 기기 지원 범위 안에서 적용됩니다.")
+        } else {
+            draft = draft.copy(exposureTimeNs = null)
+            label("이 렌즈는 수동 셔터를 지원하지 않습니다.")
+        }
+        val apertures = chars.getCameraCharacteristic(android.hardware.camera2.CameraCharacteristics.LENS_INFO_AVAILABLE_APERTURES) ?: floatArrayOf()
+        if (apertures.size > 1) choice("조리개", listOf("자동" to null) + apertures.map { "f/$it" to it }, draft.aperture) { draft = draft.copy(aperture = it) }
+        else draft = draft.copy(aperture = null)
     }
 
     private fun toast(text: String) { context?.let { Toast.makeText(it, text, Toast.LENGTH_LONG).show() } }

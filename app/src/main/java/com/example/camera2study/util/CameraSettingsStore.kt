@@ -119,6 +119,24 @@ object CameraSettingsStore {
             exposureEv = pref.getFloat("${prefix}_ev", 0f))
     }
 
+    fun toBundle(s: CameraSettings) = androidx.core.os.bundleOf(
+        "back" to s.lensFacingBack, "camera" to s.cameraId, "zoom" to s.zoomRatio, "zoomMode" to s.zoomModeRatio,
+        "ratio" to s.ratioMode, "ev" to s.exposureEv, "audio" to s.audioEnabled, "private" to s.privateSave,
+        "orientation" to s.orientation, "mirror" to s.mirrorFront, "quality" to qualityToName(s.quality),
+        "segment" to s.maxDurationMs, "count" to s.maxRepeatCount, "total" to s.totalDurationMs,
+        "fps" to s.fps, "hdr" to s.hdrEnabled, "pro" to s.proMode, "awb" to s.awbMode,
+        "kelvin" to s.colorTempK, "exposure" to (s.exposureTimeNs ?: NO_EXPOSURE_TIME), "aperture" to (s.aperture ?: NO_APERTURE))
+
+    fun fromBundle(b: android.os.Bundle) = CameraSettings(
+        lensFacingBack = b.getBoolean("back"), cameraId = b.getString("camera"), zoomRatio = b.getFloat("zoom"),
+        zoomModeRatio = b.getFloat("zoomMode"), ratioMode = b.getInt("ratio"), exposureEv = b.getFloat("ev"),
+        audioEnabled = b.getBoolean("audio"), privateSave = b.getBoolean("private"), orientation = b.getString("orientation") ?: "AUTO",
+        mirrorFront = b.getBoolean("mirror"), quality = qualityFromName(b.getString("quality")),
+        maxDurationMs = b.getLong("segment"), maxRepeatCount = b.getInt("count"), totalDurationMs = b.getLong("total"),
+        fps = b.getInt("fps"), hdrEnabled = b.getBoolean("hdr"), proMode = b.getBoolean("pro"), awbMode = b.getInt("awb"),
+        colorTempK = b.getInt("kelvin"), exposureTimeNs = b.getLong("exposure").takeIf { it != NO_EXPOSURE_TIME },
+        aperture = b.getFloat("aperture").takeIf { it != NO_APERTURE })
+
     fun snapshot(context: Context, controller: CameraController, colorTempK: Int): CameraSettings {
         val existing = load(context)
         return CameraSettings(
@@ -159,7 +177,7 @@ object CameraSettingsStore {
         controller.targetFps = settings.fps
         controller.isHdrEnabled = settings.hdrEnabled
         controller.isProMode = settings.proMode
-        controller.setAwbMode(settings.awbMode)
+        controller.setAwbMode(if (settings.proMode) settings.awbMode else CameraMetadata.CONTROL_AWB_MODE_AUTO)
         controller.setManualWbGains(
             if (settings.proMode && settings.awbMode == CameraMetadata.CONTROL_AWB_MODE_OFF) {
                 kelvinToGains(settings.colorTempK)
