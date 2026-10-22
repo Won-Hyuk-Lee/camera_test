@@ -172,16 +172,29 @@ class CameraForegroundService : LifecycleService() {
         const val ACTION_START_RECORDING = "com.example.camera2study.ACTION_START_RECORDING"
         const val ACTION_STOP_RECORDING = "com.example.camera2study.ACTION_STOP_RECORDING"
         fun requestQuickRecording(context: Context, test: Boolean = false) {
+            if (RecordingRuntime.state.value?.active == true) return
+            // Reject unavailable permissions/resources before creating an FGS start obligation.
+            // Android may terminate the process if a rejected service never enters foreground.
+            val config = CameraSettingsStore.load(context, true)
+            com.example.camera2study.util.CaptureHealth.problem(context, config.audioEnabled, true)?.let {
+                rejectQuickRecording(context, it)
+                return
+            }
             try {
                 ContextCompat.startForegroundService(context, Intent(context, CameraForegroundService::class.java).apply {
                     action = ACTION_QUICK_START; putExtra("test", test)
                 })
             } catch (e: Exception) {
-                val state = RecordingState(RecordingPhase.ERROR, message = "빠른 녹화 요청 실패: ${e.message}")
-                RecordingRuntime.state.value = state
-                RecordingStopWidgetProvider.updateAll(context, state)
-                android.widget.Toast.makeText(context, state.message, android.widget.Toast.LENGTH_LONG).show()
+                rejectQuickRecording(context, "빠른 녹화 요청 실패: ${e.message}")
             }
+        }
+        private fun rejectQuickRecording(context: Context, message: String) {
+            val journal = RecordingJournal.begin(context, "widget", "start_rejected")
+            RecordingJournal.finish(context, journal, message, "start_rejected")
+            val state = RecordingState(RecordingPhase.ERROR, message = message)
+            RecordingRuntime.state.value = state
+            RecordingStopWidgetProvider.updateAll(context, state)
+            android.widget.Toast.makeText(context, message, android.widget.Toast.LENGTH_LONG).show()
         }
         fun requestStop(context: Context) {
             try {
