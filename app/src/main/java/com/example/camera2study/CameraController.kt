@@ -171,15 +171,12 @@ class CameraController(private val context: Context) {
         }
 
     // --- 추가 기능 변수 ---
-    var currentRatioMode: Int = RATIO_3_4 // 3:4, 16:9, Full
-        set(value) {
-            if (field != value) {
-                field = value
-                if (!isRecording() && cameraProvider != null) {
-                    bindUseCases()
-                }
-            }
-        }
+    var currentRatioMode: Int = RATIO_16_9
+        set(@Suppress("UNUSED_PARAMETER") value) { field = RATIO_16_9 }
+    fun previewFrameRatio(): Float {
+        val rotation = videoCapture?.targetRotation ?: outputRotation()
+        return if (rotation == android.view.Surface.ROTATION_0 || rotation == android.view.Surface.ROTATION_180) 9f / 16f else 16f / 9f
+    }
 
     var audioEnabled: Boolean = true
     var orientationMode: String = "AUTO"
@@ -236,30 +233,12 @@ class CameraController(private val context: Context) {
     fun attachPreview(view: PreviewView) {
         if (released) return
         previewView = view
-        val provider = cameraProvider ?: return
-        val owner = lifecycleOwner ?: return
-        val video = videoCapture ?: return
-        if (previewUseCase != null) {
-            previewUseCase?.setSurfaceProvider(view.surfaceProvider)
-            return
-        }
-        try {
-            val preview = Preview.Builder().setTargetRotation(view.display?.rotation ?: android.view.Surface.ROTATION_0)
-                .setDynamicRange(video.dynamicRange).build()
-            preview.setSurfaceProvider(view.surfaceProvider)
-            camera = provider.bindToLifecycle(owner, buildSelector(), video, preview)
-            previewUseCase = preview
-            updateZoomBounds()
-        } catch (e: Exception) {
-            reportError("미리보기 연결 실패: ${e.message}")
-        }
+        previewUseCase?.setSurfaceProvider(view.surfaceProvider)
     }
-
     fun detachPreview() {
         previewView = null
-        // VideoCapture remains bound to the service; only the UI use case is removed.
-        previewUseCase?.let { cameraProvider?.unbind(it) }
-        previewUseCase = null
+        // Keep the use-case group and video crop stable while the screen is closed.
+        previewUseCase?.setSurfaceProvider(null)
     }
 
     fun reportError(message: String) {
@@ -299,11 +278,17 @@ class CameraController(private val context: Context) {
                 .setDynamicRange(dynamicRange)
                 .setMirrorMode(if (mirrorFront) androidx.camera.core.MirrorMode.MIRROR_MODE_ON_FRONT_ONLY else androidx.camera.core.MirrorMode.MIRROR_MODE_OFF)
                 .build()
-            val preview = if (previewView?.isAttachedToWindow == true) Preview.Builder()
-                .setTargetRotation(previewView?.display?.rotation ?: android.view.Surface.ROTATION_0)
-                .setDynamicRange(dynamicRange).build().also { it.setSurfaceProvider(previewView!!.surfaceProvider) } else null
-            camera = if (preview != null) provider.bindToLifecycle(owner, selector, preview, video)
-                else provider.bindToLifecycle(owner, selector, video)
+            val preview = Preview.Builder().setTargetRotation(outputRotation())
+                .setResolutionSelector(ResolutionSelector.Builder().setAspectRatioStrategy(AspectRatioStrategy.RATIO_16_9_FALLBACK_AUTO_STRATEGY).build())
+                .setMirrorMode(if (mirrorFront) androidx.camera.core.MirrorMode.MIRROR_MODE_ON_FRONT_ONLY else androidx.camera.core.MirrorMode.MIRROR_MODE_OFF)
+                .setDynamicRange(dynamicRange).build()
+            previewView?.let { preview.setSurfaceProvider(it.surfaceProvider) }
+            val rotation = outputRotation()
+            val ratio = if (rotation == android.view.Surface.ROTATION_0 || rotation == android.view.Surface.ROTATION_180) android.util.Rational(9, 16) else android.util.Rational(16, 9)
+            val group = androidx.camera.core.UseCaseGroup.Builder()
+                .setViewPort(androidx.camera.core.ViewPort.Builder(ratio, rotation).setScaleType(androidx.camera.core.ViewPort.FILL_CENTER).build())
+                .addUseCase(preview).addUseCase(video).build()
+            camera = provider.bindToLifecycle(owner, selector, group)
             previewUseCase = preview
             videoCapture = video
             lastError = null

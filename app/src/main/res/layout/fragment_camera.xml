@@ -112,57 +112,6 @@
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toBottomOf="@id/topQuickBar" />
 
-    <!-- 4. 화면 비율 조절 다이얼 (3:4 | 16:9 | Full) -->
-    <LinearLayout
-        android:id="@+id/ratioLayout"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:orientation="horizontal"
-        android:background="#99000000"
-        android:padding="4dp"
-        android:layout_marginBottom="8dp"
-        app:layout_constraintBottom_toTopOf="@id/zoomControlLayout"
-        app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintStart_toStartOf="parent">
-
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/btnRatio34"
-            android:visibility="gone"
-            style="@style/Widget.Material3.Button.TextButton"
-            android:layout_width="54dp"
-            android:layout_height="36dp"
-            android:text="3:4"
-            android:textColor="#FFC107"
-            android:textSize="11sp"
-            android:insetTop="0dp"
-            android:insetBottom="0dp"
-            android:padding="0dp" />
-
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/btnRatio169"
-            style="@style/Widget.Material3.Button.TextButton"
-            android:layout_width="54dp"
-            android:layout_height="36dp"
-            android:text="16:9"
-            android:textColor="@android:color/white"
-            android:textSize="11sp"
-            android:insetTop="0dp"
-            android:insetBottom="0dp"
-            android:padding="0dp" />
-
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/btnRatioFull"
-            style="@style/Widget.Material3.Button.TextButton"
-            android:layout_width="54dp"
-            android:layout_height="36dp"
-            android:text="Full"
-            android:textColor="@android:color/white"
-            android:textSize="11sp"
-            android:insetTop="0dp"
-            android:insetBottom="0dp"
-            android:padding="0dp" />
-    </LinearLayout>
-
     <!-- 5. 줌 다이얼 (S25 Ultra 기준 프리셋 0.6x/1x/2x/3x/5x/10x + 슬라이더) -->
     <LinearLayout
         android:id="@+id/zoomControlLayout"

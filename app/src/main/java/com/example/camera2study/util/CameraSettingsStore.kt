@@ -65,7 +65,7 @@ object CameraSettingsStore {
             lensFacingBack = pref.getBoolean(KEY_LENS_FACING_BACK, true),
             zoomRatio = pref.getFloat(KEY_ZOOM_RATIO, 1.0f),
             zoomModeRatio = pref.getFloat(KEY_ZOOM_MODE, 1.0f),
-            ratioMode = pref.getInt(KEY_RATIO_MODE, CameraController.RATIO_16_9),
+            ratioMode = CameraController.RATIO_16_9,
             quality = qualityFromName(pref.getString(KEY_QUALITY, null)),
             maxDurationMs = pref.getLong(KEY_MAX_DURATION_MS, 0L).takeIf { it > 0 } ?: 1_800_000L,
             maxRepeatCount = if (pref.getLong(KEY_MAX_DURATION_MS, 0L) == 0L) 0 else pref.getInt(KEY_MAX_REPEAT_COUNT, 0).takeIf { it in 0..998 } ?: 0,
@@ -95,7 +95,7 @@ object CameraSettingsStore {
             .putBoolean(KEY_LENS_FACING_BACK, settings.lensFacingBack)
             .putFloat(KEY_ZOOM_RATIO, settings.zoomRatio)
             .putFloat(KEY_ZOOM_MODE, settings.zoomModeRatio)
-            .putInt(KEY_RATIO_MODE, settings.ratioMode)
+            .putInt(KEY_RATIO_MODE, CameraController.RATIO_16_9)
             .putString(KEY_QUALITY, qualityToName(settings.quality))
             .putLong(KEY_MAX_DURATION_MS, settings.maxDurationMs)
             .putInt(KEY_MAX_REPEAT_COUNT, settings.maxRepeatCount)
@@ -129,7 +129,7 @@ object CameraSettingsStore {
 
     fun fromBundle(b: android.os.Bundle) = CameraSettings(
         lensFacingBack = b.getBoolean("back"), cameraId = b.getString("camera"), zoomRatio = b.getFloat("zoom"),
-        zoomModeRatio = b.getFloat("zoomMode"), ratioMode = b.getInt("ratio"), exposureEv = b.getFloat("ev"),
+        zoomModeRatio = b.getFloat("zoomMode"), ratioMode = CameraController.RATIO_16_9, exposureEv = b.getFloat("ev"),
         audioEnabled = b.getBoolean("audio"), privateSave = b.getBoolean("private"), orientation = b.getString("orientation") ?: "AUTO",
         mirrorFront = b.getBoolean("mirror"), quality = qualityFromName(b.getString("quality")),
         maxDurationMs = b.getLong("segment"), maxRepeatCount = b.getInt("count"), totalDurationMs = b.getLong("total"),

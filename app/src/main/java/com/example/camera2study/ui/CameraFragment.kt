@@ -65,7 +65,7 @@ class CameraFragment : Fragment() {
 
             // 컨트롤러 이벤트 바인딩
             controller.onControlsApplied = { if (_binding != null && !controller.isRecording()) saveCameraSettings() }
-            controller.onCameraChanged = { id -> updateLensIndicator(id) }
+            controller.onCameraChanged = { id -> updateLensIndicator(id); binding.previewView.post { fitPreview() } }
             controller.onRecordingEvent = { event -> handleRecordEvent(event) }
             com.example.camera2study.RecordingRuntime.state.removeObservers(viewLifecycleOwner)
             com.example.camera2study.RecordingRuntime.state.observe(viewLifecycleOwner) { state ->
@@ -87,7 +87,9 @@ class CameraFragment : Fragment() {
 
             // UI 및 리스너 설정
             setupZoomListeners()
-            setupRatioControls()
+            binding.previewView.scaleType = androidx.camera.view.PreviewView.ScaleType.FIT_CENTER
+            binding.root.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> fitPreview() }
+            binding.previewView.post { fitPreview() }
             setupQuickControls()
             updateThumbnail()
 
@@ -279,58 +281,19 @@ class CameraFragment : Fragment() {
         })
     }
 
-    private fun setupRatioControls() {
-        binding.btnRatio34.setOnClickListener {
-            updateRatioSelection(CameraController.RATIO_3_4)
-            saveCameraSettings()
-        }
-        binding.btnRatio169.setOnClickListener {
-            updateRatioSelection(CameraController.RATIO_16_9)
-            saveCameraSettings()
-        }
-        binding.btnRatioFull.setOnClickListener {
-            updateRatioSelection(CameraController.RATIO_FULL)
-            saveCameraSettings()
-        }
-        // 초기 비율 버튼 색상 셋업
-        updateRatioSelection(controller.currentRatioMode)
-    }
-
-    private fun updateRatioSelection(mode: Int) {
-        if (!::controller.isInitialized) return
-        controller.currentRatioMode = mode
-
-        binding.btnRatio34.setTextColor(if (mode == CameraController.RATIO_3_4) Color.parseColor("#FFC107") else Color.WHITE)
-        binding.btnRatio169.setTextColor(if (mode == CameraController.RATIO_16_9) Color.parseColor("#FFC107") else Color.WHITE)
-        binding.btnRatioFull.setTextColor(if (mode == CameraController.RATIO_FULL) Color.parseColor("#FFC107") else Color.WHITE)
-
-        // 측정 완료 후 적용해 초기 width 0으로 height가 0이 되는 깨짐을 막는다.
-        binding.previewView.post { applyPreviewAspect(mode) }
-    }
-
-    private fun applyPreviewAspect(mode: Int) {
+    private fun fitPreview() {
         val binding = _binding ?: return
+        if (!::controller.isInitialized) return
         val parent = binding.previewView.parent as? View ?: return
-        val parentWidth = parent.width
-        val parentHeight = parent.height
-        if (parentWidth == 0 || parentHeight == 0) return
-
-        val params = binding.previewView.layoutParams as ViewGroup.MarginLayoutParams
-        when (mode) {
-            CameraController.RATIO_3_4 -> {
-                params.width = ViewGroup.LayoutParams.MATCH_PARENT
-                params.height = (parentWidth * 4) / 3
-            }
-            CameraController.RATIO_16_9 -> {
-                params.width = ViewGroup.LayoutParams.MATCH_PARENT
-                params.height = (parentWidth * 16) / 9
-            }
-            CameraController.RATIO_FULL -> {
-                params.width = ViewGroup.LayoutParams.MATCH_PARENT
-                params.height = ViewGroup.LayoutParams.MATCH_PARENT
-            }
+        if (parent.width <= 0 || parent.height <= 0) return
+        val ratio = controller.previewFrameRatio()
+        val width = minOf(parent.width, (parent.height * ratio).toInt())
+        val height = (width / ratio).toInt()
+        val params = binding.previewView.layoutParams
+        if (params.width != width || params.height != height) {
+            params.width = width; params.height = height
+            binding.previewView.layoutParams = params
         }
-        binding.previewView.layoutParams = params
     }
 
     private fun setupQuickControls() {
@@ -496,7 +459,7 @@ class CameraFragment : Fragment() {
         val settings = CameraSettingsStore.load(requireContext())
         manualColorTempK = settings.colorTempK
         CameraSettingsStore.applyToController(controller, settings)
-        updateRatioSelection(settings.ratioMode)
+        binding.previewView.post { fitPreview() }
     }
 
     override fun onStart() {
