@@ -382,7 +382,7 @@ class CameraController(private val context: Context) {
             builder.setCaptureRequestOption(CaptureRequest.LENS_APERTURE, it)
         }
 
-        val afModes = info.getCameraCharacteristic(android.hardware.camera2.CameraCharacteristics.CONTROL_AF_AVAILABLE_MODES).orEmpty()
+        val afModes = info.getCameraCharacteristic(android.hardware.camera2.CameraCharacteristics.CONTROL_AF_AVAILABLE_MODES) ?: intArrayOf()
         val continuous = listOf(CameraMetadata.CONTROL_AF_MODE_CONTINUOUS_VIDEO, CameraMetadata.CONTROL_AF_MODE_CONTINUOUS_PICTURE).firstOrNull { it in afModes }
         if (continuous != null) builder.setCaptureRequestOption(CaptureRequest.CONTROL_AF_MODE, continuous)
 
