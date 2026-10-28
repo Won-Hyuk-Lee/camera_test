@@ -44,7 +44,7 @@
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btnCalcBack"
                 style="@style/CalcButtonFunction"
-                android:text="DEL" />
+                android:text="⌫" android:contentDescription="마지막 숫자 지우기" />
 
             <Space
                 style="@style/CalcButtonSpace" />
