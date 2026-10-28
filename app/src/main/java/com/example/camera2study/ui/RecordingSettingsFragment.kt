@@ -17,6 +17,7 @@ import androidx.core.content.ContextCompat
 import androidx.fragment.app.Fragment
 import com.example.camera2study.CameraForegroundService
 import com.example.camera2study.R
+import com.example.camera2study.util.VideoLook
 import com.example.camera2study.util.CameraSettingsStore
 import com.example.camera2study.util.CameraSettingsStore.CameraSettings
 
@@ -27,6 +28,7 @@ class RecordingSettingsFragment : Fragment() {
     private var list: LinearLayout? = null
     private var provider: ProcessCameraProvider? = null
     private var ready = false
+    private var details = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -140,6 +142,7 @@ class RecordingSettingsFragment : Fragment() {
         if (hdrRange == null && draft.hdrEnabled) draft = draft.copy(hdrEnabled = false)
         toggle("HDR (지원 시)", draft.hdrEnabled) {
             if (it && hdrRange == null) toast("이 카메라는 HDR 녹화를 지원하지 않습니다")
+            else if (it && !draft.look.isIdentity()) toast("색보정은 SDR 전용입니다. 색보정을 초기화한 뒤 HDR을 켜세요")
             else draft = draft.copy(hdrEnabled = it)
             render()
         }
@@ -162,6 +165,7 @@ class RecordingSettingsFragment : Fragment() {
         toggle("비공개 보관함에 저장", draft.privateSave) { draft = draft.copy(privateSave = it) }
         toggle("전면 저장 영상 좌우 반전", draft.mirrorFront) { draft = draft.copy(mirrorFront = it) }
         choice("저장 영상 방향", listOf("시작 시 기기 방향" to "AUTO", "가로" to "LANDSCAPE", "세로" to "PORTRAIT"), draft.orientation) { draft = draft.copy(orientation = it) }
+        lookControls()
         manualControls(info)
         choice("파일당 길이", listOf("10초 · 시험용" to 10_000L, "5분" to 300_000L, "10분" to 600_000L, "30분" to 1_800_000L), draft.maxDurationMs) { draft = draft.copy(maxDurationMs = it) }
         val ending = if (draft.totalDurationMs > 0) "TIME" else if (draft.maxRepeatCount > 0) "FILES" else "MANUAL"
@@ -182,6 +186,42 @@ class RecordingSettingsFragment : Fragment() {
             toast("10초 시험 촬영을 요청했습니다. 촬영 결과에서 확인하세요")
         }
         scroll?.post { if (list === container) scroll.scrollTo(0, scrollY) }
+    }
+
+    private fun lookControls() {
+        label("영상 색보정 · 미리보기와 저장 영상에 함께 적용")
+        label("센서 AWB와 별개인 색보정입니다. 어두운 부분을 밝히면 잡음도 보일 수 있습니다.")
+        if (draft.hdrEnabled) { label("HDR에서는 색보정을 사용할 수 없습니다."); return }
+        choice("색보정 프리셋", VideoLook.presets.map { it.name to it.id }, draft.look.preset) {
+            draft = draft.copy(look = VideoLook(preset = it)); render()
+        }
+        label(VideoLook.presets.first { it.id == draft.look.preset }.description)
+        slider("필터 강도", draft.look.strength, false) { draft = draft.copy(look = draft.look.copy(strength = it)) }
+        button(if (details) "상세 색보정 접기" else "상세 색보정 펼치기") { details = !details; render() }
+        if (details) {
+            slider("색온도 · 차갑게 ↔ 따뜻하게", draft.look.temperature) { draft = draft.copy(look = draft.look.copy(temperature = it)) }
+            slider("색조 · 초록 ↔ 자홍", draft.look.tint) { draft = draft.copy(look = draft.look.copy(tint = it)) }
+            slider("대비", draft.look.contrast) { draft = draft.copy(look = draft.look.copy(contrast = it)) }
+            slider("채도", draft.look.saturation) { draft = draft.copy(look = draft.look.copy(saturation = it)) }
+        }
+        button("색보정 초기화") { draft = draft.copy(look = VideoLook()); render() }
+    }
+    private fun slider(title: String, value: Float, signed: Boolean = true, change: (Float) -> Unit) {
+        val caption = label(title + " · " + (value * 100).toInt())
+        val bar = SeekBar(requireContext()).apply {
+            max = if (signed) 200 else 100
+            progress = (value * 100).toInt() + if (signed) 100 else 0
+            contentDescription = title
+            minimumHeight = (48 * resources.displayMetrics.density).toInt()
+        }
+        bar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onStartTrackingTouch(seekBar: SeekBar?) = Unit
+            override fun onStopTrackingTouch(seekBar: SeekBar?) = Unit
+            override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
+                if (fromUser) { val v = progress - if (signed) 100 else 0; change(v / 100f); caption.text = title + " · " + v }
+            }
+        })
+        list?.addView(bar)
     }
 
     private fun manualControls(info: CameraInfo) {

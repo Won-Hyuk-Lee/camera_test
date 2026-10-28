@@ -113,6 +113,8 @@ class CameraController(private val context: Context) {
     private var awbMode: Int = CameraMetadata.CONTROL_AWB_MODE_AUTO
     private var exposureTimeNs: Long? = null
     var manualIso: Int = 400
+    var videoLook = com.example.camera2study.util.VideoLook()
+    private var lookProcessor: com.example.camera2study.util.VideoLookProcessor? = null
     private var aperture: Float? = null
     private var manualWbGains: FloatArray? = null
 
@@ -258,6 +260,7 @@ class CameraController(private val context: Context) {
         zoomReady = false
         exposureReady = false
         provider.unbindAll()
+        lookProcessor?.close(); lookProcessor = null
         camera = null
         videoCapture = null
         previewUseCase = null
@@ -267,6 +270,7 @@ class CameraController(private val context: Context) {
             val info = selector.filter(provider.availableCameraInfos).firstOrNull()
                 ?: error("선택한 카메라가 공개되지 않았습니다")
             val capabilities = Recorder.getVideoCapabilities(info)
+            check(!isHdrEnabled || videoLook.isIdentity()) { "색보정은 SDR 전용입니다. HDR을 끄거나 색보정을 기본값으로 초기화하세요" }
             val dynamicRange = if (isHdrEnabled) capabilities.supportedDynamicRanges.firstOrNull {
                 it != androidx.camera.core.DynamicRange.SDR && it.bitDepth == androidx.camera.core.DynamicRange.BIT_DEPTH_10_BIT
             } ?: error("선택한 카메라는 HDR 녹화를 지원하지 않습니다") else androidx.camera.core.DynamicRange.SDR
@@ -288,8 +292,18 @@ class CameraController(private val context: Context) {
             val ratio = if (rotation == android.view.Surface.ROTATION_0 || rotation == android.view.Surface.ROTATION_180) android.util.Rational(9, 16) else android.util.Rational(16, 9)
             val group = androidx.camera.core.UseCaseGroup.Builder()
                 .setViewPort(androidx.camera.core.ViewPort.Builder(ratio, rotation).setScaleType(androidx.camera.core.ViewPort.FILL_CENTER).build())
-                .addUseCase(preview).addUseCase(video).build()
-            camera = provider.bindToLifecycle(owner, selector, group)
+                .addUseCase(preview).addUseCase(video)
+            if (!isHdrEnabled) {
+                lookProcessor = com.example.camera2study.util.VideoLookProcessor { error ->
+                    mainHandler.post {
+                        if (!released) {
+                            reportError("색보정 처리 실패: " + error.message)
+                            if (isRecording()) stopRecording("effect_error")
+                        }
+                    }
+                }.also { it.look = videoLook.normalized(); group.addEffect(it.effect) }
+            }
+            camera = provider.bindToLifecycle(owner, selector, group.build())
             previewUseCase = preview
             videoCapture = video
             lastError = null
@@ -870,6 +884,7 @@ class CameraController(private val context: Context) {
         onControlsApplied = null
         releaseWakeLock()
         cameraProvider?.unbindAll()
+        lookProcessor?.close(); lookProcessor = null
         camera = null
         videoCapture = null
     }

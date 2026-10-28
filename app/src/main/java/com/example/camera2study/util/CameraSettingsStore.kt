@@ -49,6 +49,7 @@ object CameraSettingsStore {
         val colorTempK: Int = DEFAULT_COLOR_TEMP_K,
         val exposureTimeNs: Long? = null,
         val manualIso: Int = 400,
+        val look: VideoLook = VideoLook(),
         val aperture: Float? = null
     )
 
@@ -57,6 +58,8 @@ object CameraSettingsStore {
         val exposureTime = pref.getLong(KEY_EXPOSURE_TIME_NS, NO_EXPOSURE_TIME)
         val aperture = pref.getFloat(KEY_APERTURE, NO_APERTURE)
         return CameraSettings(
+            look = VideoLook(pref.getString("look_preset", "NATURAL") ?: "NATURAL", pref.getFloat("look_strength", .65f),
+                pref.getFloat("look_temperature", 0f), pref.getFloat("look_tint", 0f), pref.getFloat("look_contrast", 0f), pref.getFloat("look_saturation", 0f)).normalized(),
             manualIso = pref.getInt("manual_iso", 400).coerceAtLeast(1),
             cameraId = pref.getString("camera_id", null),
             exposureEv = pref.getFloat("exposure_ev", 0f),
@@ -88,6 +91,12 @@ object CameraSettingsStore {
             .putString("${if (settings.lensFacingBack) "back" else "front"}_camera_id", settings.cameraId)
             .putFloat("${if (settings.lensFacingBack) "back" else "front"}_zoom", settings.zoomRatio)
             .putFloat("${if (settings.lensFacingBack) "back" else "front"}_ev", settings.exposureEv)
+            .putString("look_preset", settings.look.normalized().preset)
+            .putFloat("look_strength", settings.look.normalized().strength)
+            .putFloat("look_temperature", settings.look.normalized().temperature)
+            .putFloat("look_tint", settings.look.normalized().tint)
+            .putFloat("look_contrast", settings.look.normalized().contrast)
+            .putFloat("look_saturation", settings.look.normalized().saturation)
             .putInt("manual_iso", settings.manualIso)
             .putString("camera_id", settings.cameraId)
             .putFloat("exposure_ev", settings.exposureEv)
@@ -123,6 +132,8 @@ object CameraSettingsStore {
     }
 
     fun toBundle(s: CameraSettings) = androidx.core.os.bundleOf(
+        "look_preset" to s.look.preset, "look_strength" to s.look.strength, "look_temperature" to s.look.temperature,
+        "look_tint" to s.look.tint, "look_contrast" to s.look.contrast, "look_saturation" to s.look.saturation,
         "iso" to s.manualIso, "back" to s.lensFacingBack, "camera" to s.cameraId, "zoom" to s.zoomRatio, "zoomMode" to s.zoomModeRatio,
         "ratio" to s.ratioMode, "ev" to s.exposureEv, "audio" to s.audioEnabled, "private" to s.privateSave,
         "orientation" to s.orientation, "mirror" to s.mirrorFront, "quality" to qualityToName(s.quality),
@@ -131,6 +142,8 @@ object CameraSettingsStore {
         "kelvin" to s.colorTempK, "exposure" to (s.exposureTimeNs ?: NO_EXPOSURE_TIME), "aperture" to (s.aperture ?: NO_APERTURE))
 
     fun fromBundle(b: android.os.Bundle) = CameraSettings(
+        look = VideoLook(b.getString("look_preset") ?: "NATURAL", b.getFloat("look_strength", .65f), b.getFloat("look_temperature"),
+            b.getFloat("look_tint"), b.getFloat("look_contrast"), b.getFloat("look_saturation")).normalized(),
         manualIso = b.getInt("iso", 400), lensFacingBack = b.getBoolean("back"), cameraId = b.getString("camera"), zoomRatio = b.getFloat("zoom"),
         zoomModeRatio = b.getFloat("zoomMode"), ratioMode = CameraController.RATIO_16_9, exposureEv = b.getFloat("ev"),
         audioEnabled = b.getBoolean("audio"), privateSave = b.getBoolean("private"), orientation = b.getString("orientation") ?: "AUTO",
@@ -143,6 +156,7 @@ object CameraSettingsStore {
     fun snapshot(context: Context, controller: CameraController, colorTempK: Int): CameraSettings {
         val existing = load(context)
         return CameraSettings(
+            look = controller.videoLook,
             manualIso = controller.manualIso,
             cameraId = controller.selectedCameraId,
             exposureEv = controller.exposureEv,
@@ -169,6 +183,7 @@ object CameraSettingsStore {
     }
 
     fun applyToController(controller: CameraController, settings: CameraSettings) = controller.configure {
+        controller.videoLook = settings.look.normalized()
         controller.manualIso = settings.manualIso
         controller.audioEnabled = settings.audioEnabled
         controller.isPrivateSave = settings.privateSave
