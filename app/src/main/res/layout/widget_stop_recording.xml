@@ -1,14 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/btnWidgetToggle"
     android:layout_width="match_parent" android:layout_height="match_parent"
-    android:orientation="vertical" android:padding="8dp" android:background="#DD17202A">
-    <TextView android:id="@+id/txtWidgetStatus" android:layout_width="match_parent"
-        android:layout_height="wrap_content" android:text="동영상 · 대기" android:textColor="#FFFFFF"
-        android:textSize="12sp" android:maxLines="2" />
-    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content">
-        <Button android:id="@+id/btnWidgetStart" android:layout_width="0dp" android:layout_weight="1"
-            android:layout_height="48dp" android:text="녹화 시작" android:textSize="12sp" />
-        <Button android:id="@+id/btnWidgetStop" android:layout_width="0dp" android:layout_weight="1"
-            android:layout_height="48dp" android:text="중지" android:textSize="12sp" />
-    </LinearLayout>
-</LinearLayout>
+    android:minWidth="48dp" android:minHeight="48dp"
+    android:background="@android:color/transparent"
+    android:contentDescription="녹화 시작" android:clickable="true" android:focusable="true" />
