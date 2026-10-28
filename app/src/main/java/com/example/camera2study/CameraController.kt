@@ -112,6 +112,7 @@ class CameraController(private val context: Context) {
 
     private var awbMode: Int = CameraMetadata.CONTROL_AWB_MODE_AUTO
     private var exposureTimeNs: Long? = null
+    var manualIso: Int = 400
     private var aperture: Float? = null
     private var manualWbGains: FloatArray? = null
 
@@ -368,7 +369,7 @@ class CameraController(private val context: Context) {
             )
             builder.setCaptureRequestOption(CaptureRequest.SENSOR_EXPOSURE_TIME, expNs)
             val sensitivity = info.getCameraCharacteristic(android.hardware.camera2.CameraCharacteristics.SENSOR_INFO_SENSITIVITY_RANGE)
-            if (sensitivity != null) builder.setCaptureRequestOption(CaptureRequest.SENSOR_SENSITIVITY, 200.coerceIn(sensitivity.lower, sensitivity.upper))
+            if (sensitivity != null) builder.setCaptureRequestOption(CaptureRequest.SENSOR_SENSITIVITY, manualIso.coerceIn(sensitivity.lower, sensitivity.upper))
             builder.setCaptureRequestOption(CaptureRequest.SENSOR_FRAME_DURATION, 1_000_000_000L / targetFps)
         } else {
             builder.setCaptureRequestOption(

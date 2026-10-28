@@ -48,6 +48,7 @@ object CameraSettingsStore {
         val awbMode: Int = CameraMetadata.CONTROL_AWB_MODE_AUTO,
         val colorTempK: Int = DEFAULT_COLOR_TEMP_K,
         val exposureTimeNs: Long? = null,
+        val manualIso: Int = 400,
         val aperture: Float? = null
     )
 
@@ -56,6 +57,7 @@ object CameraSettingsStore {
         val exposureTime = pref.getLong(KEY_EXPOSURE_TIME_NS, NO_EXPOSURE_TIME)
         val aperture = pref.getFloat(KEY_APERTURE, NO_APERTURE)
         return CameraSettings(
+            manualIso = pref.getInt("manual_iso", 400).coerceAtLeast(1),
             cameraId = pref.getString("camera_id", null),
             exposureEv = pref.getFloat("exposure_ev", 0f),
             audioEnabled = pref.getBoolean("audio_enabled", true),
@@ -86,6 +88,7 @@ object CameraSettingsStore {
             .putString("${if (settings.lensFacingBack) "back" else "front"}_camera_id", settings.cameraId)
             .putFloat("${if (settings.lensFacingBack) "back" else "front"}_zoom", settings.zoomRatio)
             .putFloat("${if (settings.lensFacingBack) "back" else "front"}_ev", settings.exposureEv)
+            .putInt("manual_iso", settings.manualIso)
             .putString("camera_id", settings.cameraId)
             .putFloat("exposure_ev", settings.exposureEv)
             .putBoolean("audio_enabled", settings.audioEnabled)
@@ -120,7 +123,7 @@ object CameraSettingsStore {
     }
 
     fun toBundle(s: CameraSettings) = androidx.core.os.bundleOf(
-        "back" to s.lensFacingBack, "camera" to s.cameraId, "zoom" to s.zoomRatio, "zoomMode" to s.zoomModeRatio,
+        "iso" to s.manualIso, "back" to s.lensFacingBack, "camera" to s.cameraId, "zoom" to s.zoomRatio, "zoomMode" to s.zoomModeRatio,
         "ratio" to s.ratioMode, "ev" to s.exposureEv, "audio" to s.audioEnabled, "private" to s.privateSave,
         "orientation" to s.orientation, "mirror" to s.mirrorFront, "quality" to qualityToName(s.quality),
         "segment" to s.maxDurationMs, "count" to s.maxRepeatCount, "total" to s.totalDurationMs,
@@ -128,7 +131,7 @@ object CameraSettingsStore {
         "kelvin" to s.colorTempK, "exposure" to (s.exposureTimeNs ?: NO_EXPOSURE_TIME), "aperture" to (s.aperture ?: NO_APERTURE))
 
     fun fromBundle(b: android.os.Bundle) = CameraSettings(
-        lensFacingBack = b.getBoolean("back"), cameraId = b.getString("camera"), zoomRatio = b.getFloat("zoom"),
+        manualIso = b.getInt("iso", 400), lensFacingBack = b.getBoolean("back"), cameraId = b.getString("camera"), zoomRatio = b.getFloat("zoom"),
         zoomModeRatio = b.getFloat("zoomMode"), ratioMode = CameraController.RATIO_16_9, exposureEv = b.getFloat("ev"),
         audioEnabled = b.getBoolean("audio"), privateSave = b.getBoolean("private"), orientation = b.getString("orientation") ?: "AUTO",
         mirrorFront = b.getBoolean("mirror"), quality = qualityFromName(b.getString("quality")),
@@ -140,6 +143,7 @@ object CameraSettingsStore {
     fun snapshot(context: Context, controller: CameraController, colorTempK: Int): CameraSettings {
         val existing = load(context)
         return CameraSettings(
+            manualIso = controller.manualIso,
             cameraId = controller.selectedCameraId,
             exposureEv = controller.exposureEv,
             audioEnabled = controller.audioEnabled,
@@ -165,6 +169,7 @@ object CameraSettingsStore {
     }
 
     fun applyToController(controller: CameraController, settings: CameraSettings) = controller.configure {
+        controller.manualIso = settings.manualIso
         controller.audioEnabled = settings.audioEnabled
         controller.isPrivateSave = settings.privateSave
         controller.orientationMode = settings.orientation

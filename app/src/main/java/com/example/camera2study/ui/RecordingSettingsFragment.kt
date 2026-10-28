@@ -209,8 +209,16 @@ class RecordingSettingsFragment : Fragment() {
             val shutter = listOf("자동" to null) + listOf(30, 60, 120, 250, 500, 1000).map { "1/$it 초" to (1_000_000_000L / it) }
                 .filter { it.second in range.lower..minOf(range.upper, 1_000_000_000L / draft.fps) }
             if (draft.exposureTimeNs !in shutter.map { it.second }) draft = draft.copy(exposureTimeNs = null)
-            choice("셔터 · 수동 시 ISO 200 기준", shutter, draft.exposureTimeNs) { draft = draft.copy(exposureTimeNs = it) }
-            label("수동 셔터에서는 밝기 보정 대신 셔터로 밝기를 조절합니다. ISO는 기기 지원 범위 안에서 적용됩니다.")
+            choice("셔터", shutter, draft.exposureTimeNs) { draft = draft.copy(exposureTimeNs = it); render() }
+            if (draft.exposureTimeNs != null) {
+                val isoRange = chars.getCameraCharacteristic(android.hardware.camera2.CameraCharacteristics.SENSOR_INFO_SENSITIVITY_RANGE)
+                if (isoRange != null) {
+                    val values = (listOf(isoRange.lower, 100, 200, 400, 800, 1600, 3200, 6400, isoRange.upper, draft.manualIso).filter { it in isoRange.lower..isoRange.upper }).distinct().sorted()
+                    draft = draft.copy(manualIso = draft.manualIso.coerceIn(isoRange.lower, isoRange.upper))
+                    choice("수동 감도 · ISO", values.map { "ISO " + it to it }, draft.manualIso) { draft = draft.copy(manualIso = it) }
+                } else draft = draft.copy(exposureTimeNs = null)
+            }
+            label("어두운 실내는 자동 노출과 30 FPS를 권장합니다. 수동 셔터에서는 ISO와 셔터로 밝기를 조절하며, ISO를 높이면 잡음이 늘어날 수 있습니다.")
         } else {
             draft = draft.copy(exposureTimeNs = null)
             label("이 렌즈는 수동 셔터를 지원하지 않습니다.")
