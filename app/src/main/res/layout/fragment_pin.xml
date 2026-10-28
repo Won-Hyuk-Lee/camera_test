@@ -102,7 +102,7 @@
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btnPinBack"
                 style="@style/CalcButtonFunction"
-                android:text="DEL" />
+                android:text="⌫" android:contentDescription="마지막 숫자 지우기" />
         </LinearLayout>
     </LinearLayout>
 </androidx.constraintlayout.widget.ConstraintLayout>

@@ -46,7 +46,7 @@
             android:layout_width="0dp"
             android:layout_weight="1"
             android:layout_height="wrap_content"
-            android:text="⚙ 상세설정"
+            android:text="설정"
             android:textColor="@android:color/white"
             android:textSize="12sp" />
 
