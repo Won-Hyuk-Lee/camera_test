@@ -67,16 +67,31 @@ class CameraFragment : Fragment() {
             isBound = true
 
             // 컨트롤러 이벤트 바인딩
-            controller.onControlsApplied = { if (_binding != null && !controller.isRecording()) saveCameraSettings() }
-            controller.onCameraChanged = { id -> updateLensIndicator(id); binding.previewView.post { fitPreview() } }
+            controller.onControlsApplied = {
+                if (_binding != null) {
+                    binding.btnRecord.isEnabled = true
+                    binding.btnSettings.isEnabled = !controller.isRecording()
+                    binding.btnSwitchFacing.isEnabled = !controller.isRecording()
+                    updateCaptureSummary(controller.recordingState, true)
+                    if (!controller.isRecording()) saveCameraSettings()
+                }
+            }
+            controller.onCameraChanged = { id ->
+                updateLensIndicator(id); updateCaptureSummary(controller.recordingState, true)
+                binding.btnRecord.isEnabled = controller.isRecording() || controller.areControlsReady()
+                binding.btnSettings.isEnabled = !controller.isRecording() && controller.areControlsReady()
+                binding.btnSwitchFacing.isEnabled = binding.btnSettings.isEnabled
+                binding.previewView.post { fitPreview() }
+            }
             controller.onRecordingEvent = { event -> handleRecordEvent(event) }
             com.example.camera2study.RecordingRuntime.state.removeObservers(viewLifecycleOwner)
             com.example.camera2study.RecordingRuntime.state.observe(viewLifecycleOwner) { state ->
                 if (_binding != null) {
                     binding.btnRecord.contentDescription = if (state.active) "녹화 중지" else "녹화 시작"
                     updateCaptureSummary(state)
-                    binding.btnSettings.isEnabled = !state.active
-                    binding.btnSwitchFacing.isEnabled = !state.active
+                    binding.btnRecord.isEnabled = state.active || controller.areControlsReady()
+                    binding.btnSettings.isEnabled = !state.active && controller.areControlsReady()
+                    binding.btnSwitchFacing.isEnabled = binding.btnSettings.isEnabled
                     binding.txtTimer.text = formatElapsed(state.durationMs) + " · " + state.message
                 }
             }
@@ -137,6 +152,9 @@ class CameraFragment : Fragment() {
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
+        binding.btnRecord.isEnabled = false
+        binding.btnSettings.isEnabled = false
+        binding.btnSwitchFacing.isEnabled = false
 
         // 비녹화 상태에서는 service를 명시적으로 시작하지 않는다.
         // bindService(BIND_AUTO_CREATE)로 service를 만들기만 하고, foreground 격상은 녹화 시작 시점에 한다.
