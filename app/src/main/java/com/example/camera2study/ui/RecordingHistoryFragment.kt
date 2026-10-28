@@ -25,6 +25,8 @@ import java.util.Locale
 
 class RecordingHistoryFragment : Fragment() {
     private var list: LinearLayout? = null
+    private var refreshKey = ""
+    private var loadVersion = 0
     private val export = registerForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
         if (uri != null) {
             val ctx = requireContext().applicationContext
@@ -45,13 +47,18 @@ class RecordingHistoryFragment : Fragment() {
         return ScrollView(requireContext()).apply { fitsSystemWindows = true; addView(content) }
     }
     override fun onViewCreated(view: View, state: Bundle?) {
-        RecordingRuntime.state.observe(viewLifecycleOwner) { if (!it.active) reload() }
+        RecordingRuntime.state.observe(viewLifecycleOwner) { state ->
+            val key = state.sessionId + ":" + state.segment + ":" + state.phase
+            if (key != refreshKey) { refreshKey = key; reload() }
+        }
         reload()
     }
     private fun reload() {
         val ctx = context ?: return
+        val version = ++loadVersion
         viewLifecycleOwner.lifecycleScope.launch {
             val sessions = withContext(Dispatchers.IO) { RecordingJournal.recover(ctx); RecordingJournal.sessions(ctx).take(100) }
+            if (version != loadVersion) return@launch
             val container = list ?: return@launch
             container.removeAllViews()
             fun button(text: String, action: () -> Unit) {

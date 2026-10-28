@@ -48,6 +48,8 @@ class PrivateVaultFragment : Fragment(), com.example.camera2study.EntryLockListe
     private var _binding: FragmentPrivateVaultBinding? = null
     private val binding get() = _binding!!
 
+    private var loadVersion = 0
+    private var refreshKey = ""
     private var mediaFiles = ArrayList<File>()
     private val mediaInfo = mutableMapOf<String, VideoFiles.Info>()
     private val exporting = mutableSetOf<String>()
@@ -72,7 +74,8 @@ class PrivateVaultFragment : Fragment(), com.example.camera2study.EntryLockListe
         setupRecyclerView()
         loadMediaFiles()
         com.example.camera2study.RecordingRuntime.state.observe(viewLifecycleOwner) { state ->
-            if (!state.active) loadMediaFiles()
+            val key = state.sessionId + ":" + state.segment + ":" + state.phase
+            if (key != refreshKey) { refreshKey = key; loadMediaFiles() }
         }
     }
 
@@ -87,6 +90,7 @@ class PrivateVaultFragment : Fragment(), com.example.camera2study.EntryLockListe
 
     private fun loadMediaFiles() {
         val ctx = context ?: return
+        val version = ++loadVersion
         val privateDir = File(ctx.getExternalFilesDir(null), "private_vault")
 
         viewLifecycleOwner.lifecycleScope.launch {
@@ -99,7 +103,7 @@ class PrivateVaultFragment : Fragment(), com.example.camera2study.EntryLockListe
                     .orEmpty()
                 files.map { it to VideoFiles.inspect(it) }
             }
-            if (_binding == null) return@launch
+            if (_binding == null || version != loadVersion) return@launch
             mediaFiles.clear()
             mediaFiles.addAll(sorted.map { it.first })
             mediaInfo.clear()
