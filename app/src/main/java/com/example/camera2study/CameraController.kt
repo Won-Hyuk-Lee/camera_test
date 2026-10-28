@@ -293,7 +293,7 @@ class CameraController(private val context: Context) {
             val group = androidx.camera.core.UseCaseGroup.Builder()
                 .setViewPort(androidx.camera.core.ViewPort.Builder(ratio, rotation).setScaleType(androidx.camera.core.ViewPort.FILL_CENTER).build())
                 .addUseCase(preview).addUseCase(video)
-            if (!isHdrEnabled) {
+            if (!isHdrEnabled && !videoLook.isIdentity()) {
                 lookProcessor = com.example.camera2study.util.VideoLookProcessor { error ->
                     mainHandler.post {
                         if (!released) {

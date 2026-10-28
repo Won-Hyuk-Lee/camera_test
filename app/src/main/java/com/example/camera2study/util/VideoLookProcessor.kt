@@ -119,7 +119,9 @@ precision highp float; uniform samplerExternalOES image; varying vec2 uv; unifor
         if (!closing || inputs > 0) return
         if (display != EGL14.EGL_NO_DISPLAY) {
             outputs.values.forEach { EGL14.eglDestroySurface(display,it) }; outputs.clear()
-            current(pbuffer); GLES20.glDeleteProgram(program)
+            if (context != EGL14.EGL_NO_CONTEXT && pbuffer != EGL14.EGL_NO_SURFACE) {
+                runCatching { current(pbuffer); GLES20.glDeleteProgram(program) }
+            }
             EGL14.eglMakeCurrent(display,EGL14.EGL_NO_SURFACE,EGL14.EGL_NO_SURFACE,EGL14.EGL_NO_CONTEXT)
             EGL14.eglDestroySurface(display,pbuffer); EGL14.eglDestroyContext(display,context); EGL14.eglTerminate(display)
             display = EGL14.EGL_NO_DISPLAY
