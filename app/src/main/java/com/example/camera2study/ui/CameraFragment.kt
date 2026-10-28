@@ -318,7 +318,8 @@ class CameraFragment : Fragment() {
         val parent = binding.previewView.parent as? View ?: return
         if (parent.width <= 0 || parent.height <= 0) return
         val ratio = controller.previewFrameRatio()
-        val width = minOf(parent.width, (parent.height * ratio).toInt())
+        val controlsWidth = binding.root.findViewById<View>(R.id.landscapeControls)?.width ?: 0
+        val width = minOf((parent.width - controlsWidth).coerceAtLeast(1), (parent.height * ratio).toInt())
         val height = (width / ratio).toInt()
         val params = binding.previewView.layoutParams
         if (params.width != width || params.height != height) {
