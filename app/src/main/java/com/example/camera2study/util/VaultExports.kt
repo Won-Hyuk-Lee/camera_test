@@ -91,7 +91,9 @@ object VaultExports {
     }
     private fun published(job: Job): Boolean = runCatching {
         if (job.uri.isEmpty()) return false
-        context!!.contentResolver.query(Uri.parse(job.uri),arrayOf(MediaStore.MediaColumns.SIZE,MediaStore.MediaColumns.IS_PENDING),null,null,null)?.use {
+        val resolver = context!!.contentResolver
+        if (resolver.openFileDescriptor(Uri.parse(job.uri), "r")?.use { it.statSize == job.size } != true) return false
+        resolver.query(Uri.parse(job.uri),arrayOf(MediaStore.MediaColumns.SIZE,MediaStore.MediaColumns.IS_PENDING),null,null,null)?.use {
             it.moveToFirst() && it.getLong(0) == job.size && it.getInt(1) == 0
         } == true
     }.getOrDefault(false)

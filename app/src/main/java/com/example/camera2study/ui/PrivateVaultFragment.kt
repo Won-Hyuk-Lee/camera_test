@@ -44,6 +44,7 @@ class PrivateVaultFragment : Fragment(), com.example.camera2study.EntryLockListe
     private var query = ""
     private var sort = 0
     private var filter = 0
+    private val exportButtons = linkedMapOf<String, Button>()
     private lateinit var adapter: VaultAdapter
     private data class Row(val title: String, val files: List<File>, val file: File? = null, val key: String = "")
     private val date = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.getDefault())
@@ -76,25 +77,7 @@ class PrivateVaultFragment : Fragment(), com.example.camera2study.EntryLockListe
         binding.exportSelected.setOnClickListener { export(mediaFiles.filter { it.absolutePath in selected }) }
         binding.deleteSelected.setOnClickListener { delete(mediaFiles.filter { it.absolutePath in selected }) }
         VaultExports.initialize(requireContext())
-        VaultExports.state.observe(viewLifecycleOwner) { jobs ->
-            binding.exportStatus.removeAllViews()
-            (binding.exportStatus.parent as View).visibility = if (jobs.isEmpty()) View.GONE else View.VISIBLE
-            if (jobs.isNotEmpty()) {
-                binding.exportStatus.addView(TextView(requireContext()).apply {
-                    text = "내보내기 · 원본 유지 / 앱 종료 시 다음 실행에서 재시도"
-                    setTextColor(Color.WHITE); textSize = 14f
-                })
-                jobs.filter { it.busy || it.state != "COMPLETE" }.take(3).plus(jobs.filter { it.state == "COMPLETE" }.take(1)).forEach { job ->
-                    val status = when (job.state) { "QUEUED" -> "대기"; "COPYING" -> "복사"; "VERIFYING" -> "검증"; "COMPLETE" -> "완료"; "CANCELED" -> "취소"; else -> "실패" }
-                    binding.exportStatus.addView(android.widget.Button(requireContext()).apply {
-                        text = File(job.path).name + " · " + status + " " + (job.done * 100 / job.size.coerceAtLeast(1)) + "%" +
-                            if (job.busy) " · 취소" else if (job.state != "COMPLETE") " · 재시도: " + job.error else ""
-                        setOnClickListener { if (job.busy) VaultExports.cancel(job.id) else VaultExports.retry(job.id) }
-                    })
-                }
-            }
-        }
-
+        VaultExports.state.observe(viewLifecycleOwner, ::renderExports)
         adapter = VaultAdapter()
         binding.rvVaultMedia.layoutManager = LinearLayoutManager(requireContext())
         binding.rvVaultMedia.adapter = adapter
@@ -102,6 +85,32 @@ class PrivateVaultFragment : Fragment(), com.example.camera2study.EntryLockListe
         com.example.camera2study.RecordingRuntime.state.observe(viewLifecycleOwner) { state ->
             val key = state.sessionId + ":" + state.segment + ":" + state.phase
             if (key != refreshKey) { refreshKey = key; loadMediaFiles() }
+        }
+    }
+    private fun renderExports(jobs: List<VaultExports.Job>) {
+        (binding.exportStatus.parent as View).visibility = if (jobs.isEmpty()) View.GONE else View.VISIBLE
+        val visible = jobs.filter { it.busy || it.state != "COMPLETE" }.take(3) + jobs.filter { it.state == "COMPLETE" }.take(1)
+        if (exportButtons.keys.toList() != visible.map { it.id }) {
+            binding.exportStatus.removeAllViews(); exportButtons.clear()
+            binding.exportStatus.addView(TextView(requireContext()).apply {
+                text = "내보내기 · 원본 유지 / 앱 종료 시 다음 실행에서 재시도"
+                setTextColor(Color.WHITE); textSize = 14f
+            })
+            visible.forEach { job ->
+                val button = Button(requireContext())
+                exportButtons[job.id] = button
+                binding.exportStatus.addView(button)
+            }
+        }
+        visible.forEach { job ->
+            val status = when (job.state) { "QUEUED" -> "대기"; "COPYING" -> "복사"; "VERIFYING" -> "검증"; "COMPLETE" -> "완료"; "CANCELED" -> "취소"; else -> "실패" }
+            exportButtons[job.id]?.apply {
+                text = File(job.path).name + " · " + status + " " + (job.done * 100 / job.size.coerceAtLeast(1)) + "%" +
+                    if (job.busy) " · 취소" else if (job.state != "COMPLETE") " · 재시도: " + job.error else ""
+                contentDescription = if (job.busy) "내보내기 취소 " + File(job.path).name
+                    else if (job.state != "COMPLETE") "내보내기 재시도 " + File(job.path).name else "내보내기 완료 " + File(job.path).name
+                setOnClickListener { if (job.busy) VaultExports.cancel(job.id) else VaultExports.retry(job.id) }
+            }
         }
     }
     private fun setupChoice(spinner: Spinner, labels: List<String>, index: Int, action: (Int) -> Unit) {
@@ -298,5 +307,5 @@ class PrivateVaultFragment : Fragment(), com.example.camera2study.EntryLockListe
         }
         fun close() { io.shutdownNow(); main.removeCallbacksAndMessages(null); cache.evictAll() }
     }
-    override fun onDestroyView() { onEntryLocked(); if (::adapter.isInitialized) adapter.close(); _binding = null; super.onDestroyView() }
+    override fun onDestroyView() { exportButtons.clear(); onEntryLocked(); if (::adapter.isInitialized) adapter.close(); _binding = null; super.onDestroyView() }
 }
