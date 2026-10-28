@@ -52,7 +52,7 @@ class SettingsFragment : Fragment() {
         }
 
         binding.btnRequestPermissions.setOnClickListener {
-            permissionLauncher.launch(PermissionHelper.REQUIRED_PERMISSIONS)
+            requestMissingPermissions()
         }
 
         binding.btnDisableNotification.setOnClickListener {
@@ -76,6 +76,14 @@ class SettingsFragment : Fragment() {
             }
         }
 
+        val normalSettings = android.widget.Button(requireContext()).apply {
+            text = "일반 촬영 설정 · 마이크 없이 촬영 설정 가능"
+            setOnClickListener { parentFragmentManager.beginTransaction()
+                .replace(com.example.camera2study.R.id.container, RecordingSettingsFragment.create(false))
+                .addToBackStack(null).commit() }
+        }
+        val settingsParent = binding.btnQuickRecordingSettings.parent as android.view.ViewGroup
+        settingsParent.addView(normalSettings, settingsParent.indexOfChild(binding.btnQuickRecordingSettings))
         binding.btnQuickRecordingSettings.setOnClickListener {
             parentFragmentManager.beginTransaction()
                 .replace(com.example.camera2study.R.id.container, RecordingSettingsFragment.create(true))
@@ -147,7 +155,25 @@ class SettingsFragment : Fragment() {
         }
     }
 
+    private fun requestMissingPermissions() {
+        val ctx = requireContext()
+        val missing = PermissionHelper.REQUIRED_PERMISSIONS.filter { ContextCompat.checkSelfPermission(ctx, it) != PackageManager.PERMISSION_GRANTED }
+        val prefs = ctx.getSharedPreferences("permission_requests", Context.MODE_PRIVATE)
+        val fixed = missing.any { prefs.getBoolean(it, false) && !shouldShowRequestPermissionRationale(it) }
+        if (fixed) {
+            MaterialAlertDialogBuilder(ctx).setTitle("앱 권한에서 허용해 주세요")
+                .setMessage("반복 거절한 권한은 시스템 설정에서 변경해야 합니다. 권한 → 카메라 또는 마이크에서 허용을 선택하세요. 마이크 없이 촬영하려면 일반/빠른 촬영 설정에서 마이크 녹음을 끌 수 있습니다.")
+                .setPositiveButton("앱 권한 설정") { _, _ ->
+                    startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, android.net.Uri.parse("package:" + ctx.packageName)))
+                }.setNegativeButton("취소", null).show()
+        } else if (missing.isNotEmpty()) {
+            prefs.edit().apply { missing.forEach { putBoolean(it, true) } }.apply()
+            permissionLauncher.launch(missing.toTypedArray())
+        }
+    }
+
     private fun checkPermissionsState() {
+        if (_binding == null) return
         val ctx = requireContext()
 
         // 1. 카메라
