@@ -60,6 +60,8 @@ object RecordingJournal {
         item.put("status", if (error == null && bytes > 0 && duration > 0) "COMPLETE" else "CHECK")
             .put("durationMs", duration).put("bytes", bytes).put("error", error ?: "")
             .put("uri", uri).put("endedAt", System.currentTimeMillis())
+        item.put("encodedBytes", bytes)
+        refreshFileSize(context, item)
         save(context, session)
     }
 
@@ -82,8 +84,25 @@ object RecordingJournal {
         }
     }
 
+    private fun refreshFileSize(context: Context, item: JSONObject) {
+        val size = runCatching {
+            val path = item.optString("path")
+            if (path.isNotBlank()) File(path).takeIf { it.isFile }?.length()
+            else item.optString("uri").takeIf { it.startsWith("content://") }?.let { value ->
+                context.contentResolver.openFileDescriptor(android.net.Uri.parse(value), "r")?.use { it.statSize.takeIf { bytes -> bytes >= 0 } }
+            }
+        }.getOrNull()
+        item.put("bytes", size ?: 0).put("sizeKnown", size != null)
+    }
+
     @Synchronized fun sessions(context: Context): List<JSONObject> = directory(context).listFiles()
         ?.filter { it.extension == "json" }?.sortedByDescending { it.name }?.mapNotNull {
-            runCatching { JSONObject(AtomicFile(it).openRead().bufferedReader().use { reader -> reader.readText() }) }.getOrNull()
+            runCatching { JSONObject(AtomicFile(it).openRead().bufferedReader().use { reader -> reader.readText() }).also { session ->
+                val files = session.getJSONArray("segments")
+                for (index in 0 until files.length()) {
+                    val item = files.getJSONObject(index)
+                    if (item.optString("status") == "COMPLETE") refreshFileSize(context, item)
+                }
+            } }.getOrNull()
         }.orEmpty()
 }

@@ -78,16 +78,19 @@ class RecordingHistoryFragment : Fragment() {
                 var duration = 0L
                 var bytes = 0L
                 var complete = 0
+                var sizeKnown = true
                 val details = mutableListOf<String>()
                 for (i in 0 until files.length()) {
                     val file = files.getJSONObject(i)
                     duration += file.optLong("durationMs")
                     bytes += file.optLong("bytes")
+                    sizeKnown = sizeKnown && file.optBoolean("sizeKnown", false)
                     if (file.optString("status") == "COMPLETE") complete++
                     details += "${i + 1}. ${status(file.optString("status"))} · ${file.optLong("durationMs") / 1000}초\n${file.optString("name")}"
                 }
                 text("${formatter.format(Date(session.optLong("startedAt")))} · ${status(session.optString("status"))}\n" +
-                    "총 %02d:%02d · 완료 %d/%d개 · %.1f MB\n".format(duration / 60_000, duration / 1000 % 60, complete, files.length(), bytes / 1_048_576.0) +
+                    "총 %02d:%02d · 완료 %d/%d개 · ".format(duration / 60_000, duration / 1000 % 60, complete, files.length()) +
+                    (if (sizeKnown) "%.1f MiB".format(bytes / 1_048_576.0) else "용량 확인 필요") + "\n" +
                     "시작: ${session.optString("source")} · 종료: ${session.optString("reason")}\n" +
                     session.optString("error") + "\n" + details.joinToString("\n"))
                 val privateFiles = (0 until files.length()).map { files.getJSONObject(it) }.filter { it.optString("path").isNotBlank() }
