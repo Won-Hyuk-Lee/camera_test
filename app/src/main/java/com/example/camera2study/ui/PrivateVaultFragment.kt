@@ -1,11 +1,9 @@
 package com.example.camera2study.ui
 
-import android.content.ContentValues
 import android.content.Context
 import android.graphics.BitmapFactory
 import android.graphics.Color
 import android.media.ThumbnailUtils
-import android.net.Uri
 import android.os.Bundle
 import android.os.CancellationSignal
 import android.provider.MediaStore
@@ -13,64 +11,70 @@ import android.util.Size
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
-import android.widget.FrameLayout
-import android.widget.ImageView
-import android.widget.MediaController
-import android.widget.TextView
-import android.widget.Toast
-import android.widget.VideoView
-import androidx.collection.LruCache
+import android.widget.*
+import androidx.core.widget.doAfterTextChanged
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
-import androidx.recyclerview.widget.GridLayoutManager
+import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import com.example.camera2study.util.RecordingJournal
-import com.example.camera2study.util.VaultExports
 import com.example.camera2study.util.VideoFiles
+import com.example.camera2study.util.VaultExports
 import com.example.camera2study.R
 import com.example.camera2study.databinding.FragmentPrivateVaultBinding
-import com.example.camera2study.databinding.ItemVaultMediaBinding
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import java.io.File
-import java.io.FileInputStream
-import java.io.FileOutputStream
 
 class PrivateVaultFragment : Fragment(), com.example.camera2study.EntryLockListener {
     private val dialogs = mutableSetOf<android.app.Dialog>()
-    override fun onEntryLocked() {
-        dialogs.toList().forEach { it.dismiss() }
-        dialogs.clear()
-    }
+    override fun onEntryLocked() { dialogs.toList().forEach { it.dismiss() }; dialogs.clear() }
     override fun onStop() { onEntryLocked(); super.onStop() }
-
     private var _binding: FragmentPrivateVaultBinding? = null
     private val binding get() = _binding!!
-
     private var loadVersion = 0
     private var refreshKey = ""
-    private var mediaFiles = ArrayList<File>()
+    private val mediaFiles = arrayListOf<File>()
     private val mediaInfo = mutableMapOf<String, VideoFiles.Info>()
+    private val selected = mutableSetOf<String>()
+    private val collapsed = mutableSetOf<String>()
+    private val rows = arrayListOf<Row>()
+    private var query = ""
+    private var sort = 0
+    private var filter = 0
     private lateinit var adapter: VaultAdapter
-
-    override fun onCreateView(
-        inflater: LayoutInflater,
-        container: ViewGroup?,
-        savedInstanceState: Bundle?
-    ): View {
-        _binding = FragmentPrivateVaultBinding.inflate(inflater, container, false)
-        return binding.root
+    private data class Row(val title: String, val files: List<File>, val file: File? = null, val key: String = "")
+    private val date = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.getDefault())
+    override fun onCreate(state: Bundle?) {
+        super.onCreate(state)
+        query = state?.getString("query").orEmpty(); sort = state?.getInt("sort") ?: 0; filter = state?.getInt("filter") ?: 0
+        selected.addAll(state?.getStringArrayList("selected").orEmpty())
+        collapsed.addAll(state?.getStringArrayList("collapsed").orEmpty())
     }
-
-    override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
-        super.onViewCreated(view, savedInstanceState)
-
-        binding.btnBack.setOnClickListener {
-            parentFragmentManager.popBackStack()
+    override fun onSaveInstanceState(out: Bundle) {
+        out.putString("query",query); out.putInt("sort",sort); out.putInt("filter",filter)
+        out.putStringArrayList("selected",ArrayList(selected)); out.putStringArrayList("collapsed",ArrayList(collapsed))
+        super.onSaveInstanceState(out)
+    }
+    override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, state: Bundle?): View {
+        _binding = FragmentPrivateVaultBinding.inflate(inflater,container,false); return binding.root
+    }
+    override fun onViewCreated(view: View, state: Bundle?) {
+        binding.btnBack.setOnClickListener { parentFragmentManager.popBackStack() }
+        binding.searchQuery.setText(query)
+        binding.searchQuery.doAfterTextChanged { query = it.toString(); renderRows() }
+        setupChoice(binding.sortOrder,listOf("최신 촬영순","오래된 촬영순","용량 큰 순","길이 긴 순"),sort) { sort = it; renderRows() }
+        setupChoice(binding.statusFilter,listOf("모든 상태","완료","기록 중","확인 필요"),filter) { filter = it; renderRows() }
+        binding.selectVisible.setOnClickListener {
+            val visible = rows.filter { it.file == null }.flatMap { it.files }.filter { it.absolutePath !in RecordingJournal.activePaths }
+            if (visible.all { it.absolutePath in selected }) visible.forEach { selected.remove(it.absolutePath) }
+            else visible.forEach { selected.add(it.absolutePath) }
+            renderRows()
         }
-
+        binding.exportSelected.setOnClickListener { export(mediaFiles.filter { it.absolutePath in selected }) }
+        binding.deleteSelected.setOnClickListener { delete(mediaFiles.filter { it.absolutePath in selected }) }
         VaultExports.initialize(requireContext())
         VaultExports.state.observe(viewLifecycleOwner) { jobs ->
             binding.exportStatus.removeAllViews()
@@ -89,55 +93,95 @@ class PrivateVaultFragment : Fragment(), com.example.camera2study.EntryLockListe
                 }
             }
         }
-        setupRecyclerView()
+
+        adapter = VaultAdapter()
+        binding.rvVaultMedia.layoutManager = LinearLayoutManager(requireContext())
+        binding.rvVaultMedia.adapter = adapter
         loadMediaFiles()
         com.example.camera2study.RecordingRuntime.state.observe(viewLifecycleOwner) { state ->
             val key = state.sessionId + ":" + state.segment + ":" + state.phase
             if (key != refreshKey) { refreshKey = key; loadMediaFiles() }
         }
     }
-
-    private fun setupRecyclerView() {
-        adapter = VaultAdapter(requireContext(), mediaFiles, mediaInfo,
-            onItemClick = { file -> showMediaDetail(file) },
-            onItemLongClick = { file -> showMediaManageOptions(file) }
-        )
-        binding.rvVaultMedia.layoutManager = GridLayoutManager(requireContext(), 3)
-        binding.rvVaultMedia.adapter = adapter
-    }
-
-    private fun loadMediaFiles() {
-        val ctx = context ?: return
-        val version = ++loadVersion
-        val privateDir = File(ctx.getExternalFilesDir(null), "private_vault")
-
-        viewLifecycleOwner.lifecycleScope.launch {
-            val sorted = withContext(Dispatchers.IO) {
-                if (!privateDir.exists()) privateDir.mkdirs()
-                val files = privateDir.listFiles()
-                    ?.filter { it.isFile && (it.name.endsWith(".jpg") || it.name.endsWith(".mp4")) }
-                    ?.filter { file -> arguments?.getString("sessionId")?.let { file.name.contains(it) } ?: true }
-                    ?.sortedByDescending { it.lastModified() }
-                    .orEmpty()
-                files.map { it to VideoFiles.inspect(it) }
-            }
-            if (_binding == null || version != loadVersion) return@launch
-            mediaFiles.clear()
-            mediaFiles.addAll(sorted.map { it.first })
-            mediaInfo.clear()
-            sorted.forEach { mediaInfo[it.first.absolutePath] = it.second }
-            if (mediaFiles.isEmpty()) {
-                binding.emptyView.visibility = View.VISIBLE
-                binding.rvVaultMedia.visibility = View.GONE
-            } else {
-                binding.emptyView.visibility = View.GONE
-                binding.rvVaultMedia.visibility = View.VISIBLE
-            }
-            adapter.notifyDataSetChanged()
+    private fun setupChoice(spinner: Spinner, labels: List<String>, index: Int, action: (Int) -> Unit) {
+        spinner.adapter = object : ArrayAdapter<String>(requireContext(),android.R.layout.simple_spinner_dropdown_item,labels) {
+            override fun getView(p: Int,v: View?,parent: ViewGroup): View = super.getView(p,v,parent).also { (it as TextView).setTextColor(Color.WHITE) }
+            override fun getDropDownView(p: Int,v: View?,parent: ViewGroup): View = super.getDropDownView(p,v,parent).also { (it as TextView).setTextColor(Color.WHITE); it.setBackgroundColor(Color.DKGRAY); it.minimumHeight = dp(48) }
+        }
+        spinner.setSelection(index)
+        spinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onNothingSelected(parent: AdapterView<*>?) = Unit
+            override fun onItemSelected(parent: AdapterView<*>?,v: View?,position: Int,id: Long) { action(position) }
         }
     }
-
-    // --- 인앱 뷰어 / 비디오 안전 플레이어 다이얼로그 ---
+    private fun loadMediaFiles() {
+        val ctx = context ?: return; val version = ++loadVersion
+        val privateDir = File(ctx.getExternalFilesDir(null),"private_vault")
+        val sessionId = arguments?.getString("sessionId")
+        viewLifecycleOwner.lifecycleScope.launch {
+            val files = withContext(Dispatchers.IO) {
+                privateDir.listFiles().orEmpty().filter { it.isFile && it.extension in listOf("jpg","mp4") &&
+                    (sessionId == null || it.name.contains(sessionId)) }.map { it to VideoFiles.inspect(it) }
+            }
+            if (_binding == null || version != loadVersion) return@launch
+            mediaFiles.clear(); mediaFiles.addAll(files.map { it.first })
+            mediaInfo.clear(); files.forEach { mediaInfo[it.first.absolutePath] = it.second }
+            selected.retainAll(mediaFiles.map { it.absolutePath }.toSet())
+            renderRows()
+        }
+    }
+    private fun groupKey(file: File): String = if (file.name.startsWith("StudyVault_") && file.nameWithoutExtension.substringAfterLast('_').toIntOrNull() != null)
+        file.nameWithoutExtension.substringBeforeLast('_') else file.name
+    private fun renderRows() {
+        if (_binding == null || !::adapter.isInitialized) return
+        val groups = mediaFiles.filter { file ->
+            val info = mediaInfo[file.absolutePath]
+            (query.isBlank() || (file.name + " " + date.format(java.util.Date(file.lastModified()))).contains(query,true)) &&
+                when (filter) { 1 -> info?.playable == true; 2 -> file.absolutePath in RecordingJournal.activePaths; 3 -> info?.playable != true && file.absolutePath !in RecordingJournal.activePaths; else -> true }
+        }.groupBy(::groupKey).entries.sortedWith(Comparator { a,b ->
+            when (sort) {
+                1 -> a.value.minOf { it.lastModified() }.compareTo(b.value.minOf { it.lastModified() })
+                2 -> b.value.sumOf { it.length() }.compareTo(a.value.sumOf { it.length() })
+                3 -> b.value.sumOf { mediaInfo[it.absolutePath]?.durationMs ?: 0 }.compareTo(a.value.sumOf { mediaInfo[it.absolutePath]?.durationMs ?: 0 })
+                else -> b.value.maxOf { it.lastModified() }.compareTo(a.value.maxOf { it.lastModified() })
+            }
+        })
+        rows.clear()
+        groups.forEach { group ->
+            val files = group.value.sortedBy { it.nameWithoutExtension.substringAfterLast('_').toIntOrNull() ?: 0 }
+            val ms = files.sumOf { mediaInfo[it.absolutePath]?.durationMs ?: 0 }
+            val title = date.format(java.util.Date(files.minOf { it.lastModified() })) + " · " + files.size + "개 · " +
+                "%02d:%02d".format(ms / 60000,ms / 1000 % 60) + " · %.1f MiB".format(files.sumOf { it.length() } / 1048576.0)
+            rows.add(Row((if (group.key in collapsed) "▶ " else "▼ ") + title,files,key = group.key))
+            if (group.key !in collapsed) files.forEachIndexed { i,file -> rows.add(Row((i+1).toString() + "/" + files.size,files,file,group.key)) }
+        }
+        binding.emptyView.visibility = if (rows.isEmpty()) View.VISIBLE else View.GONE
+        binding.selectionSummary.text = groups.size.toString() + "개 촬영 · " + selected.size + "개 선택"
+        binding.exportSelected.isEnabled = selected.isNotEmpty(); binding.deleteSelected.isEnabled = selected.isNotEmpty()
+        adapter.notifyDataSetChanged()
+    }
+    private fun export(files: List<File>) {
+        val eligible = files.filter { mediaInfo[it.absolutePath]?.playable == true && it.absolutePath !in RecordingJournal.activePaths }
+        eligible.forEach { runCatching { VaultExports.enqueue(requireContext(),it) }.onFailure { toast(it.message.orEmpty()) } }
+        toast(eligible.size.toString() + "개 내보내기 요청 · 원본 유지" + if (eligible.size < files.size) " · 기록 중/손상 파일 제외" else "")
+    }
+    private fun delete(files: List<File>) {
+        MaterialAlertDialogBuilder(requireContext()).setTitle("선택 파일 영구 삭제")
+            .setMessage(files.size.toString() + "개 파일을 삭제합니다. 복구할 수 없으며 기록·내보내기 중인 파일은 제외합니다.")
+            .setPositiveButton("삭제") { _,_ ->
+                viewLifecycleOwner.lifecycleScope.launch {
+                    val count = withContext(Dispatchers.IO) { files.count { VaultExports.deleteSource(it) } }
+                    toast(count.toString() + "개 삭제"); loadMediaFiles()
+                }
+            }.setNegativeButton("취소",null).create().also { dialogs.add(it); it.show() }
+    }
+    private fun manage(file: File) {
+        MaterialAlertDialogBuilder(requireContext()).setTitle(file.name).setItems(arrayOf("공개 갤러리로 내보내기","영구 삭제")) { _,which ->
+            if (which == 0) export(listOf(file)) else delete(listOf(file))
+        }.create().also { dialogs.add(it); it.show() }
+    }
+    private fun toast(text: String) { context?.let { Toast.makeText(it,text,Toast.LENGTH_LONG).show() } }
+    private fun dp(n: Int) = (n * resources.displayMetrics.density).toInt()
     private fun showMediaDetail(file: File) {
         if (file.absolutePath in RecordingJournal.activePaths || mediaInfo[file.absolutePath]?.playable != true) {
             Toast.makeText(requireContext(), mediaInfo[file.absolutePath]?.label ?: "파일 확인 필요", Toast.LENGTH_LONG).show()
@@ -197,136 +241,61 @@ class PrivateVaultFragment : Fragment(), com.example.camera2study.EntryLockListe
         dialog.show()
     }
 
-    // --- 롱클릭 파일 관리 (내보내기 / 삭제) ---
-    private fun showMediaManageOptions(file: File) {
-        if (file.absolutePath in RecordingJournal.activePaths || VaultExports.isBusy(file.absolutePath)) {
-            Toast.makeText(requireContext(), "기록 또는 내보내기 중인 파일은 변경할 수 없습니다", Toast.LENGTH_SHORT).show()
-            return
+
+    private inner class VaultAdapter : RecyclerView.Adapter<VaultAdapter.Holder>() {
+        private val io = java.util.concurrent.Executors.newFixedThreadPool(2)
+        private val main = android.os.Handler(android.os.Looper.getMainLooper())
+        private val cache = object : androidx.collection.LruCache<String,android.graphics.Bitmap>(8 * 1024 * 1024) {
+            override fun sizeOf(key: String,value: android.graphics.Bitmap) = value.byteCount
         }
-        val options = arrayOf("공개 갤러리로 내보내기 (Export)", "영구 삭제 (Delete)")
-        MaterialAlertDialogBuilder(requireContext())
-            .setTitle("파일 관리 (${file.name})")
-            .setItems(options) { _, which ->
-                when (which) {
-                    0 -> exportToPublicGallery(file)
-                    1 -> deleteMediaFile(file)
+        inner class Holder(val row: LinearLayout,val select: CheckBox,val thumbnail: ImageView,val text: TextView,val more: Button) : RecyclerView.ViewHolder(row) { var path = "" }
+        override fun onCreateViewHolder(parent: ViewGroup,type: Int): Holder {
+            val ctx = parent.context
+            val row = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL; gravity = android.view.Gravity.CENTER_VERTICAL; setPadding(0,dp(6),0,dp(6)); layoutParams = RecyclerView.LayoutParams(-1,-2) }
+            val select = CheckBox(ctx); row.addView(select,LinearLayout.LayoutParams(dp(48),dp(48)))
+            val image = ImageView(ctx).apply { scaleType = ImageView.ScaleType.CENTER_CROP }; row.addView(image,LinearLayout.LayoutParams(dp(64),dp(64)))
+            val text = TextView(ctx).apply { textSize = 14f; setTextColor(Color.WHITE); setPadding(dp(8),0,dp(4),0); minimumHeight = dp(48) }
+            row.addView(text,LinearLayout.LayoutParams(0,-2,1f))
+            val more = Button(ctx).apply { this.text = "⋮"; contentDescription = "파일 관리" }; row.addView(more,LinearLayout.LayoutParams(dp(48),dp(48)))
+            return Holder(row,select,image,text,more)
+        }
+        override fun getItemCount() = rows.size
+        override fun onBindViewHolder(h: Holder,p: Int) {
+            val r = rows[p]; val f = r.file
+            h.path = f?.absolutePath.orEmpty(); h.select.setOnCheckedChangeListener(null)
+            val selectable = r.files.filter { it.absolutePath !in RecordingJournal.activePaths }
+            h.select.isChecked = if (f == null) selectable.isNotEmpty() && selectable.all { it.absolutePath in selected } else f.absolutePath in selected
+            h.select.isEnabled = if (f == null) selectable.isNotEmpty() else f.absolutePath !in RecordingJournal.activePaths
+            h.select.contentDescription = if (f == null) "촬영 전체 선택 " + r.title else "파일 선택 " + r.title
+            h.select.setOnCheckedChangeListener { _,checked ->
+                (if (f == null) selectable else listOf(f)).forEach { if (checked) selected.add(it.absolutePath) else selected.remove(it.absolutePath) }
+                main.post { renderRows() }
+            }
+            h.thumbnail.visibility = if (f == null) View.GONE else View.VISIBLE
+            h.more.visibility = if (f == null) View.GONE else View.VISIBLE
+            h.text.text = if (f == null) r.title else r.title + " · " + mediaInfo[f.absolutePath]?.label.orEmpty() + " · %.1f MiB".format(f.length()/1048576.0) + "\n" + f.name
+            h.text.setOnClickListener {
+                if (f == null) { if (!collapsed.add(r.key)) collapsed.remove(r.key); renderRows() } else showMediaDetail(f)
+            }
+            h.more.setOnClickListener { if (f != null) manage(f) }
+            h.thumbnail.setOnClickListener { if (f != null) showMediaDetail(f) }
+            if (f != null) {
+                h.thumbnail.setImageResource(android.R.drawable.ic_menu_gallery)
+                val key = f.absolutePath + ":" + f.length()
+                val cached = cache.get(key)
+                if (cached != null) h.thumbnail.setImageBitmap(cached)
+                else if (mediaInfo[f.absolutePath]?.playable == true) io.execute {
+                    val bitmap = runCatching {
+                        if (f.extension == "jpg") BitmapFactory.decodeFile(f.absolutePath,BitmapFactory.Options().apply { inSampleSize = 8 })
+                        else if (android.os.Build.VERSION.SDK_INT >= 29) ThumbnailUtils.createVideoThumbnail(f,Size(128,128),CancellationSignal())
+                        else @Suppress("DEPRECATION") ThumbnailUtils.createVideoThumbnail(f.absolutePath,MediaStore.Images.Thumbnails.MINI_KIND)
+                    }.getOrNull()
+                    if (bitmap != null) cache.put(key,bitmap)
+                    main.post { if (h.path == f.absolutePath && bitmap != null) h.thumbnail.setImageBitmap(bitmap) }
                 }
             }
-            .create().also { dialogs.add(it); it.show() }
-    }
-
-    private fun exportToPublicGallery(file: File) {
-        runCatching { VaultExports.enqueue(requireContext(), file) }
-            .onSuccess { Toast.makeText(requireContext(), "내보내기 목록에 추가했습니다. 같은 파일은 중복 복사하지 않습니다", Toast.LENGTH_LONG).show() }
-            .onFailure { Toast.makeText(requireContext(), it.message, Toast.LENGTH_LONG).show() }
-    }
-
-    private fun deleteMediaFile(file: File) {
-        MaterialAlertDialogBuilder(requireContext())
-            .setTitle("영구 삭제")
-            .setMessage("이 영상/사진을 비공개 보관함에서 완전히 영구 삭제하시겠습니까? 복구할 수 없습니다.")
-            .setPositiveButton("삭제") { _, _ ->
-                if (file.absolutePath in RecordingJournal.activePaths || VaultExports.isBusy(file.absolutePath)) {
-                    Toast.makeText(requireContext(), "사용 중인 파일입니다", Toast.LENGTH_SHORT).show()
-                    return@setPositiveButton
-                }
-                if (VaultExports.deleteSource(file)) {
-                    Toast.makeText(requireContext(), "파일을 삭제했습니다.", Toast.LENGTH_SHORT).show()
-                    loadMediaFiles()
-                } else {
-                    Toast.makeText(requireContext(), "파일 소거 실패", Toast.LENGTH_SHORT).show()
-                }
-            }
-            .setNegativeButton("취소", null)
-            .create().also { dialogs.add(it); it.show() }
-    }
-
-    override fun onDestroyView() {
-        onEntryLocked()
-        if (::adapter.isInitialized) adapter.close()
-        super.onDestroyView()
-        _binding = null
-    }
-
-    // --- Recycler Grid Adapter ---
-    private class VaultAdapter(
-        private val context: Context,
-        private val list: List<File>,
-        private val info: Map<String, VideoFiles.Info>,
-        private val onItemClick: (File) -> Unit,
-        private val onItemLongClick: (File) -> Unit
-    ) : RecyclerView.Adapter<VaultAdapter.MediaViewHolder>() {
-
-        // 8MB 캐시. 같은 폴더에서 스크롤할 때 매번 디코드하지 않게 한다.
-        private val thumbCache = object : LruCache<String, android.graphics.Bitmap>(8 * 1024 * 1024) {
-            override fun sizeOf(key: String, value: android.graphics.Bitmap): Int = value.byteCount
         }
-
-        private val ioExecutor = java.util.concurrent.Executors.newFixedThreadPool(2)
-        private val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
-
-        class MediaViewHolder(val binding: ItemVaultMediaBinding) : RecyclerView.ViewHolder(binding.root) {
-            var boundPath: String? = null
-        }
-
-        override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): MediaViewHolder {
-            val binding = ItemVaultMediaBinding.inflate(LayoutInflater.from(parent.context), parent, false)
-            return MediaViewHolder(binding)
-        }
-
-        override fun onBindViewHolder(holder: MediaViewHolder, position: Int) {
-            val file = list[position]
-            val path = file.absolutePath
-            holder.boundPath = path
-            holder.binding.txtMediaName.text = "${info[path]?.label.orEmpty()}\n${file.name}"
-            holder.binding.imgPlayMark.visibility =
-                if (file.name.endsWith(".mp4")) View.VISIBLE else View.GONE
-
-            val cached = thumbCache.get(path)
-            if (path in RecordingJournal.activePaths) {
-                holder.binding.imgThumbnail.setImageResource(android.R.drawable.ic_media_pause)
-            } else if (cached != null) {
-                holder.binding.imgThumbnail.setImageBitmap(cached)
-            } else {
-                holder.binding.imgThumbnail.setImageResource(android.R.drawable.ic_menu_gallery)
-                ioExecutor.execute {
-                    val bitmap = decodeThumbnail(file)
-                    if (bitmap != null) thumbCache.put(path, bitmap)
-                    mainHandler.post {
-                        // 스크롤로 인해 holder가 다른 항목에 재바인딩된 경우 결과를 버린다.
-                        if (holder.boundPath == path && bitmap != null) {
-                            holder.binding.imgThumbnail.setImageBitmap(bitmap)
-                        }
-                    }
-                }
-            }
-
-            holder.binding.mediaCard.setOnClickListener { onItemClick(file) }
-            holder.binding.mediaCard.setOnLongClickListener {
-                onItemLongClick(file)
-                true
-            }
-        }
-
-        private fun decodeThumbnail(file: File): android.graphics.Bitmap? = try {
-            if (file.name.endsWith(".jpg")) {
-                val opts = BitmapFactory.Options().apply { inSampleSize = 4 }
-                BitmapFactory.decodeFile(file.absolutePath, opts)
-            } else if (file.name.endsWith(".mp4")) {
-                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
-                    ThumbnailUtils.createVideoThumbnail(file, Size(128, 128), CancellationSignal())
-                } else {
-                    @Suppress("DEPRECATION")
-                    ThumbnailUtils.createVideoThumbnail(file.absolutePath, MediaStore.Images.Thumbnails.MINI_KIND)
-                }
-            } else null
-        } catch (e: Exception) {
-            e.printStackTrace()
-            null
-        }
-
-        fun close() { ioExecutor.shutdownNow(); mainHandler.removeCallbacksAndMessages(null); thumbCache.evictAll() }
-
-        override fun getItemCount(): Int = list.size
+        fun close() { io.shutdownNow(); main.removeCallbacksAndMessages(null); cache.evictAll() }
     }
+    override fun onDestroyView() { onEntryLocked(); if (::adapter.isInitialized) adapter.close(); _binding = null; super.onDestroyView() }
 }

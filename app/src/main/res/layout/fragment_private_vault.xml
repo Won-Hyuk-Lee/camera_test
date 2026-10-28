@@ -1,91 +1,21 @@
 <?xml version="1.0" encoding="utf-8"?>
-<androidx.constraintlayout.widget.ConstraintLayout xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:app="http://schemas.android.com/apk/res-auto"
-    android:layout_width="match_parent"
-    android:layout_height="match_parent"
-    android:background="@android:color/black"
-    android:padding="16dp"
-    android:fitsSystemWindows="true">
-
-    <!-- 상단바 -->
-    <com.google.android.material.button.MaterialButton
-        android:id="@+id/btnBack"
-        style="@style/Widget.Material3.Button.TextButton"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="◀ 홈으로"
-        android:textColor="@android:color/white"
-        android:textSize="14sp"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toTopOf="parent" />
-
-    <TextView
-        android:id="@+id/txtVaultTitle"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="🔒 비공개 보관함"
-        android:textColor="@android:color/white"
-        android:textSize="18sp"
-        android:textStyle="bold"
-        app:layout_constraintBottom_toBottomOf="@id/btnBack"
-        app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toTopOf="@id/btnBack" />
-
-    <View
-        android:id="@+id/dividerTop"
-        android:layout_width="match_parent"
-        android:layout_height="1dp"
-        android:layout_marginTop="8dp"
-        android:background="#33FFFFFF"
-        app:layout_constraintTop_toBottomOf="@id/btnBack" />
-
-    <LinearLayout android:id="@+id/exportStatus" android:layout_width="0dp" android:layout_height="wrap_content" android:orientation="vertical" app:layout_constraintStart_toStartOf="parent" app:layout_constraintEnd_toEndOf="parent" app:layout_constraintTop_toBottomOf="@id/dividerTop" />
-
-    <!-- 빈 상태 설명 뷰 -->
-    <LinearLayout
-        android:id="@+id/emptyView"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:orientation="vertical"
-        android:gravity="center"
-        android:visibility="gone"
-        app:layout_constraintBottom_toBottomOf="parent"
-        app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toBottomOf="@id/exportStatus">
-
-        <ImageView
-            android:layout_width="64dp"
-            android:layout_height="64dp"
-            android:src="@android:drawable/ic_secure"
-            app:tint="#4DFFFFFF" />
-
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
-            android:text="보관함이 비어 있습니다"
-            android:textColor="#8AFFFFFF"
-            android:textSize="14sp"
-            android:textStyle="bold" />
-
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="4dp"
-            android:text="촬영 시 보관함 전용 공간에 저장됩니다"
-            android:textColor="#59FFFFFF"
-            android:textSize="11sp" />
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android" android:layout_width="match_parent" android:layout_height="match_parent" android:background="#121419" android:orientation="vertical" android:padding="12dp" android:fitsSystemWindows="true">
+    <Button android:id="@+id/btnBack" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="뒤로"/>
+    <TextView android:id="@+id/txtVaultTitle" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="비공개 보관함" android:textSize="20sp" android:textColor="#FFFFFF"/>
+    <EditText android:id="@+id/searchQuery" android:layout_width="match_parent" android:layout_height="wrap_content" android:minHeight="48dp" android:hint="촬영 날짜 또는 파일명 검색" android:inputType="text" android:singleLine="true" android:textColor="#FFFFFF" android:textColorHint="#CCCCCC"/>
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal">
+        <Spinner android:id="@+id/sortOrder" android:layout_width="0dp" android:layout_weight="1" android:layout_height="48dp" android:contentDescription="보관함 정렬"/>
+        <Spinner android:id="@+id/statusFilter" android:layout_width="0dp" android:layout_weight="1" android:layout_height="48dp" android:contentDescription="파일 상태 필터"/>
     </LinearLayout>
-
-    <!-- 그리드 미디어 목록 -->
-    <androidx.recyclerview.widget.RecyclerView
-        android:id="@+id/rvVaultMedia"
-        android:layout_width="match_parent"
-        android:layout_height="0dp"
-        android:layout_marginTop="12dp"
-        app:layout_constraintBottom_toBottomOf="parent"
-        app:layout_constraintTop_toBottomOf="@id/exportStatus" />
-
-</androidx.constraintlayout.widget.ConstraintLayout>
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal">
+        <Button android:id="@+id/selectVisible" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:text="전체 선택"/>
+        <Button android:id="@+id/exportSelected" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:text="내보내기"/>
+        <Button android:id="@+id/deleteSelected" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:text="삭제"/>
+    </LinearLayout>
+    <TextView android:id="@+id/selectionSummary" android:layout_width="match_parent" android:layout_height="wrap_content" android:textSize="14sp" android:textColor="#CCCCCC"/>
+    <ScrollView android:layout_width="match_parent" android:layout_height="wrap_content" android:maxHeight="160dp">
+        <LinearLayout android:id="@+id/exportStatus" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical"/>
+    </ScrollView>
+    <TextView android:id="@+id/emptyView" android:layout_width="match_parent" android:layout_height="wrap_content" android:padding="16dp" android:text="표시할 영상이 없습니다" android:textColor="#FFFFFF" android:visibility="gone"/>
+    <androidx.recyclerview.widget.RecyclerView android:id="@+id/rvVaultMedia" android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1"/>
+</LinearLayout>
