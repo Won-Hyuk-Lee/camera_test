@@ -12,6 +12,8 @@ import java.util.concurrent.ConcurrentHashMap
 /** Small atomic metadata files; video bytes are never rewritten or deleted here. */
 object RecordingJournal {
     private var recovered = false
+    @Volatile var recoveredInterruption = false
+        private set
     val activePaths: MutableSet<String> = ConcurrentHashMap.newKeySet()
 
     fun directory(context: Context) = File(context.filesDir, "recording_sessions").apply { mkdirs() }
@@ -23,6 +25,7 @@ object RecordingJournal {
             runCatching {
                 val session = JSONObject(AtomicFile(file).openRead().bufferedReader().use { it.readText() })
                 if (session.optString("status") == "ACTIVE") {
+                    recoveredInterruption = true
                     session.put("status", "INTERRUPTED").put("reason", "이전 프로세스에서 저장 완료를 확인하지 못했습니다")
                     val segments = session.getJSONArray("segments")
                     for (i in 0 until segments.length()) {
