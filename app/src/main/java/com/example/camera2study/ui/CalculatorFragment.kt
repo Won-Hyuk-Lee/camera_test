@@ -197,7 +197,7 @@ class CalculatorFragment : Fragment() {
             HomeFragment()
         }
         parentFragmentManager.beginTransaction()
-            .replace(R.id.container, fragment)
+            .replace(id, fragment)
             .commit()
     }
 
