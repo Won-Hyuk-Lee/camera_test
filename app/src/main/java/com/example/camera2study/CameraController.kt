@@ -58,7 +58,7 @@ class CameraController(private val context: Context) {
                 in 225..314 -> android.view.Surface.ROTATION_90
                 else -> android.view.Surface.ROTATION_0
             }
-            if (!isRecording()) videoCapture?.targetRotation = outputRotation()
+            if (!isRecording() && videoCapture != null && videoCapture?.targetRotation != outputRotation()) bindUseCases()
         }
     }
     private fun outputRotation(): Int = when (orientationMode) {
