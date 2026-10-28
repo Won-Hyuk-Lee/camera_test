@@ -24,7 +24,10 @@ import com.example.camera2study.util.CameraSettingsStore.CameraSettings
 @androidx.annotation.OptIn(ExperimentalCamera2Interop::class)
 class RecordingSettingsFragment : Fragment() {
     private val quick get() = arguments?.getBoolean("quick", false) == true
+    private var baseline = CameraSettings()
+    private var statusLabel: TextView? = null
     private var draft = CameraSettings()
+        set(value) { field = value; statusLabel?.text = if (value == baseline) "저장된 설정" else "미저장 변경 · 저장 후 다음 촬영에 적용" }
     private var list: LinearLayout? = null
     private var provider: ProcessCameraProvider? = null
     private var ready = false
@@ -32,6 +35,10 @@ class RecordingSettingsFragment : Fragment() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        baseline = CameraSettingsStore.load(requireContext(), quick)
+        requireActivity().onBackPressedDispatcher.addCallback(this, object : androidx.activity.OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() { leave() }
+        })
         draft = savedInstanceState?.getBundle("draft")?.let(CameraSettingsStore::fromBundle)
             ?: CameraSettingsStore.load(requireContext(), quick)
     }
@@ -110,14 +117,27 @@ class RecordingSettingsFragment : Fragment() {
         val scroll = container.parent as? ScrollView
         val scrollY = scroll?.scrollY ?: 0
         container.removeAllViews()
-        button("뒤로") { parentFragmentManager.popBackStack() }
+        button("뒤로") { leave() }
+        statusLabel = label(if (draft == baseline) "저장된 설정" else "미저장 변경 · 저장 후 다음 촬영에 적용")
+        button("이 프로필 기본값으로 초기화") {
+            com.google.android.material.dialog.MaterialAlertDialogBuilder(requireContext()).setTitle("설정 초기화")
+                .setMessage("현재 전면/후면 프로필을 기본값으로 되돌립니다. 설정 저장을 눌러야 적용됩니다.")
+                .setPositiveButton("초기화") { _, _ -> draft = CameraSettings(lensFacingBack = draft.lensFacingBack); render() }
+                .setNegativeButton("취소", null).show()
+        }
         label(if (quick) "빠른 녹화 전용 설정" else "동영상 촬영 설정")
         label("저장한 설정은 다음 촬영부터 적용됩니다. 초점은 연속 자동초점을 사용합니다.")
         if (quick) button("현재 촬영 설정 가져오기") {
             draft = CameraSettingsStore.load(requireContext()); render()
         }
         choice("카메라", listOf("후면" to true, "전면" to false), draft.lensFacingBack) {
-            draft = draft.copy(lensFacingBack = it, cameraId = null, zoomRatio = 1f, zoomModeRatio = 1f, exposureEv = 0f); render()
+            if (draft != baseline) {
+                com.google.android.material.dialog.MaterialAlertDialogBuilder(requireContext()).setTitle("카메라 전환")
+                    .setMessage("현재 변경을 저장하고 다른 카메라 설정을 불러올까요?")
+                    .setPositiveButton("저장 후 전환") { _, _ -> saveDraft(); switchFacing(it) }
+                    .setNegativeButton("변경 취소 후 전환") { _, _ -> switchFacing(it) }
+                    .setNeutralButton("돌아가기") { _, _ -> render() }.setOnCancelListener { render() }.show()
+            } else switchFacing(it)
         }
         val info = selectedInfo()
         if (!ready || info == null) { label("카메라 정보를 확인 중입니다. 권한을 허용해 주세요."); return }
@@ -177,17 +197,34 @@ class RecordingSettingsFragment : Fragment() {
         if (ending == "TIME") choice("총 녹화 시간", listOf("20초 · 시험용" to 20_000L, "30분" to 1_800_000L, "60분" to 3_600_000L, "120분" to 7_200_000L), draft.totalDurationMs) { draft = draft.copy(totalDurationMs = it) }
         if (ending == "TIME") label("분할 후 남은 시간이 1초 미만이면 짧은 파일을 추가하지 않고 종료합니다.")
         button("설정 저장") {
-            CameraSettingsStore.save(requireContext(), draft, quick)
+            saveDraft()
             toast("설정을 저장했습니다. 다음 촬영부터 적용됩니다")
         }
         if (quick) button("저장 후 10초 시험 촬영") {
-            CameraSettingsStore.save(requireContext(), draft, true)
+            saveDraft()
             CameraForegroundService.requestQuickRecording(requireContext(), test = true)
             toast("10초 시험 촬영을 요청했습니다. 촬영 결과에서 확인하세요")
         }
         scroll?.post { if (list === container) scroll.scrollTo(0, scrollY) }
     }
 
+    private fun saveDraft() {
+        CameraSettingsStore.save(requireContext(), draft, quick)
+        baseline = draft
+        statusLabel?.text = "저장된 설정"
+    }
+    private fun switchFacing(back: Boolean) {
+        baseline = CameraSettingsStore.loadForFacing(requireContext(), back, quick)
+        draft = baseline; render()
+    }
+    private fun leave() {
+        if (draft == baseline) { parentFragmentManager.popBackStack(); return }
+        com.google.android.material.dialog.MaterialAlertDialogBuilder(requireContext()).setTitle("미저장 설정")
+            .setMessage("변경한 설정을 저장할까요?")
+            .setPositiveButton("저장 후 나가기") { _, _ -> saveDraft(); parentFragmentManager.popBackStack() }
+            .setNegativeButton("저장 안 함") { _, _ -> parentFragmentManager.popBackStack() }
+            .setNeutralButton("계속 편집", null).show()
+    }
     private fun lookControls() {
         label("영상 색보정 · 미리보기와 저장 영상에 함께 적용")
         label("센서 AWB와 별개인 색보정입니다. 어두운 부분을 밝히면 잡음도 보일 수 있습니다.")

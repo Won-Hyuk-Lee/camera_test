@@ -86,8 +86,13 @@ object CameraSettingsStore {
     }
 
     fun save(context: Context, settings: CameraSettings, quick: Boolean = false) {
+        val json = org.json.JSONObject()
+        val bundle = toBundle(settings)
+        bundle.keySet().forEach { json.put(it, bundle.get(it) ?: org.json.JSONObject.NULL) }
         context.getSharedPreferences(if (quick) "quick_recording_pref" else PREF_NAME, Context.MODE_PRIVATE)
             .edit()
+            .putInt("schema_version", 2)
+            .putString((if (settings.lensFacingBack) "back" else "front") + "_profile", json.toString())
             .putString("${if (settings.lensFacingBack) "back" else "front"}_camera_id", settings.cameraId)
             .putFloat("${if (settings.lensFacingBack) "back" else "front"}_zoom", settings.zoomRatio)
             .putFloat("${if (settings.lensFacingBack) "back" else "front"}_ev", settings.exposureEv)
@@ -122,10 +127,27 @@ object CameraSettingsStore {
             .apply()
     }
 
-    fun loadForFacing(context: Context, back: Boolean): CameraSettings {
-        val pref = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+    fun loadForFacing(context: Context, back: Boolean, quick: Boolean = false): CameraSettings {
+        val pref = context.getSharedPreferences(if (quick) "quick_recording_pref" else PREF_NAME, Context.MODE_PRIVATE)
         val prefix = if (back) "back" else "front"
-        return load(context).copy(lensFacingBack = back,
+        pref.getString(prefix + "_profile", null)?.let { encoded ->
+            runCatching {
+                val json = org.json.JSONObject(encoded)
+                val bundle = android.os.Bundle()
+                val defaults = toBundle(CameraSettings())
+                json.keys().forEach { key ->
+                    when (defaults.get(key)) {
+                        is Boolean -> bundle.putBoolean(key, json.getBoolean(key))
+                        is Int -> bundle.putInt(key, json.getInt(key))
+                        is Long -> bundle.putLong(key, json.getLong(key))
+                        is Float -> bundle.putFloat(key, json.getDouble(key).toFloat())
+                        else -> if (!json.isNull(key)) bundle.putString(key, json.getString(key))
+                    }
+                }
+                return fromBundle(bundle).copy(lensFacingBack = back)
+            }
+        }
+        return load(context, quick).copy(lensFacingBack = back,
             cameraId = pref.getString("${prefix}_camera_id", null),
             zoomRatio = pref.getFloat("${prefix}_zoom", 1f),
             exposureEv = pref.getFloat("${prefix}_ev", 0f))
