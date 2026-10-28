@@ -255,7 +255,7 @@
                 android:layout_height="wrap_content"
                 android:layout_below="@id/lblVault"
                 android:layout_marginTop="8dp"
-                android:text="일반 갤러리에 노출되지 않는 나만의 철통 보안 보관함"
+                android:text="갤러리 목록에 표시하지 않는 앱 전용 영상 보관함"
                 android:textColor="#8AFFFFFF"
                 android:textSize="12sp" />
 

@@ -26,8 +26,13 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
+        refreshScreenProtection()
         onBackPressedDispatcher.addCallback(this, lockedBack)
         showProtection(!entry.authenticated)
+    }
+    fun refreshScreenProtection() {
+        if (com.example.camera2study.util.SecurityPrefs.blockScreenCapture(this)) window.addFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE)
+        else window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE)
     }
     override fun onResumeFragments() {
         super.onResumeFragments()

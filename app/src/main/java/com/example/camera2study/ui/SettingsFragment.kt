@@ -84,6 +84,18 @@ class SettingsFragment : Fragment() {
         }
         val settingsParent = binding.btnQuickRecordingSettings.parent as android.view.ViewGroup
         settingsParent.addView(normalSettings, settingsParent.indexOfChild(binding.btnQuickRecordingSettings))
+        settingsParent.addView(android.widget.TextView(requireContext()).apply {
+            text = "보관함은 갤러리 비노출 저장이며 영상 자체를 암호화하지 않습니다. 앱 삭제·데이터 삭제 시 영상도 삭제됩니다. 중요한 영상은 먼저 내보내세요. 영상·PIN·설정·진단은 자동 백업 및 기기 이전에서 제외됩니다."
+            setTextColor(Color.LTGRAY); textSize = 14f; setPadding(12, 16, 12, 16)
+        })
+        settingsParent.addView(android.widget.CheckBox(requireContext()).apply {
+            text = "앱 화면 캡처 차단 (선택)"; setTextColor(Color.WHITE)
+            isChecked = SecurityPrefs.blockScreenCapture(requireContext())
+            setOnCheckedChangeListener { _, value ->
+                SecurityPrefs.setBlockScreenCapture(requireContext(), value)
+                (requireActivity() as com.example.camera2study.MainActivity).refreshScreenProtection()
+            }
+        })
         binding.btnQuickRecordingSettings.setOnClickListener {
             parentFragmentManager.beginTransaction()
                 .replace(com.example.camera2study.R.id.container, RecordingSettingsFragment.create(true))

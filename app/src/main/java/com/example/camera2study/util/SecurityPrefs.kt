@@ -8,6 +8,11 @@ object SecurityPrefs {
     private const val KEY_PIN_ENABLED = "pin_enabled"
     private const val KEY_PIN_HASH = "pin_hash"
 
+    fun blockScreenCapture(context: Context) = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE).getBoolean("block_capture", false)
+    fun setBlockScreenCapture(context: Context, blocked: Boolean) {
+        context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE).edit().putBoolean("block_capture", blocked).apply()
+    }
+
     fun isPinEnabled(context: Context): Boolean {
         val pref = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
         return pref.getBoolean(KEY_PIN_ENABLED, false) && pref.getString(KEY_PIN_HASH, null) != null

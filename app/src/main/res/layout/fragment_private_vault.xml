@@ -23,7 +23,7 @@
         android:id="@+id/txtVaultTitle"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="🔒 비공개 보안 보관함"
+        android:text="🔒 비공개 보관함"
         android:textColor="@android:color/white"
         android:textSize="18sp"
         android:textStyle="bold"
