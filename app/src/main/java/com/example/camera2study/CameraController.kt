@@ -72,7 +72,6 @@ class CameraController(private val context: Context) {
     private var zoomRequest = 0L
     private var exposureRequest = 0L
     private var optionsRequest = 0L
-    private var focusRequest = 0L
     private var zoomReady = false
     private var exposureReady = false
     fun areControlsReady(): Boolean = zoomReady && exposureReady
@@ -211,7 +210,6 @@ class CameraController(private val context: Context) {
     var onCameraChanged: ((String?) -> Unit)? = null
     var onZoomChanged: ((Float, Float) -> Unit)? = null // current, max
     var onControlsApplied: (() -> Unit)? = null
-    var onFocusResult: ((Boolean) -> Unit)? = null
     var onFinalizeEnded: (() -> Unit)? = null
 
     val backLenses: List<LensInfo> by lazy { CameraUtils.listBackLenses(context) }
@@ -399,7 +397,9 @@ class CameraController(private val context: Context) {
             builder.setCaptureRequestOption(CaptureRequest.LENS_APERTURE, it)
         }
 
-        // CameraX owns AF mode and temporarily changes it for tap-to-focus.
+        val afModes = info.getCameraCharacteristic(android.hardware.camera2.CameraCharacteristics.CONTROL_AF_AVAILABLE_MODES).orEmpty()
+        val continuous = listOf(CameraMetadata.CONTROL_AF_MODE_CONTINUOUS_VIDEO, CameraMetadata.CONTROL_AF_MODE_CONTINUOUS_PICTURE).firstOrNull { it in afModes }
+        if (continuous != null) builder.setCaptureRequestOption(CaptureRequest.CONTROL_AF_MODE, continuous)
 
         // 노출 자동 보정 및 안티밴딩
         if (expNs == null) {
@@ -514,28 +514,6 @@ class CameraController(private val context: Context) {
         selectedCameraId = id
         pendingZoomAfterBind = nativeZoom
         zoomRatio = nativeZoom
-    }
-
-    // 원터치 초점 (Tap to Focus)
-    fun tapToFocus(x: Float, y: Float) {
-        val cam = camera ?: return
-        val generation = cameraGeneration
-        val request = ++focusRequest
-        val view = previewView ?: return
-        val factory = view.meteringPointFactory
-        val point = factory.createPoint(x, y)
-        val action = FocusMeteringAction.Builder(point, FocusMeteringAction.FLAG_AF or FocusMeteringAction.FLAG_AE)
-            .setAutoCancelDuration(3, TimeUnit.SECONDS) // 3초 후 연속 초점으로 복귀
-            .build()
-        if (!cam.cameraInfo.isFocusMeteringSupported(action)) {
-            onFocusResult?.invoke(false)
-            return
-        }
-        val future = cam.cameraControl.startFocusAndMetering(action)
-        future.addListener({
-            if (cam === camera && generation == cameraGeneration && request == focusRequest && !released)
-                onFocusResult?.invoke(runCatching { future.get().isFocusSuccessful }.getOrDefault(false))
-        }, ContextCompat.getMainExecutor(context))
     }
 
     fun switchFacing() {
@@ -904,7 +882,6 @@ class CameraController(private val context: Context) {
         onZoomChanged = null
         onError = null
         onControlsApplied = null
-        onFocusResult = null
         releaseWakeLock()
         cameraProvider?.unbindAll()
         camera = null

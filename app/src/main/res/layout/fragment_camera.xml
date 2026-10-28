@@ -76,6 +76,11 @@
             android:text="📐 격자 OFF"
             android:textColor="@android:color/white"
             android:textSize="11sp" />
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnBrightness" style="@style/Widget.Material3.Button.TextButton"
+            android:layout_width="0dp" android:layout_height="48dp" android:layout_weight="1"
+            android:text="밝기" android:textSize="12sp" android:textColor="@android:color/white"
+            android:contentDescription="밝기 조절 열기" />
     </LinearLayout>
 
     <!-- 실시간 렌즈 정보 및 타이머 오버레이 -->

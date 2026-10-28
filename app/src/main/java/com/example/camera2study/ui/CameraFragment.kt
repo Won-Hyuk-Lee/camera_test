@@ -65,9 +65,6 @@ class CameraFragment : Fragment() {
 
             // 컨트롤러 이벤트 바인딩
             controller.onControlsApplied = { if (_binding != null && !controller.isRecording()) saveCameraSettings() }
-            controller.onFocusResult = { success -> context?.let {
-                Toast.makeText(it, if (success) "초점을 맞췄습니다" else "초점 확인 실패 또는 미지원", Toast.LENGTH_SHORT).show()
-            } }
             controller.onCameraChanged = { id -> updateLensIndicator(id) }
             controller.onRecordingEvent = { event -> handleRecordEvent(event) }
             com.example.camera2study.RecordingRuntime.state.removeObservers(viewLifecycleOwner)
@@ -90,7 +87,6 @@ class CameraFragment : Fragment() {
 
             // UI 및 리스너 설정
             setupZoomListeners()
-            setupTouchToFocus()
             setupRatioControls()
             setupQuickControls()
             updateThumbnail()
@@ -283,25 +279,6 @@ class CameraFragment : Fragment() {
         })
     }
 
-    @SuppressLint("ClickableViewAccessibility")
-    private fun setupTouchToFocus() {
-        binding.previewView.setOnTouchListener { _, event ->
-            if (event.action == MotionEvent.ACTION_UP) {
-                if (::controller.isInitialized) {
-                    controller.tapToFocus(event.x, event.y)
-                    
-                    setupExposureSlider()
-                    binding.sliderExposure.visibility = View.VISIBLE
-                    handler.removeCallbacks(exposureFadeRunnable)
-                    handler.postDelayed(exposureFadeRunnable, 3000L)
-                    
-                }
-            }
-            true
-        }
-    }
-
-
     private fun setupRatioControls() {
         binding.btnRatio34.setOnClickListener {
             updateRatioSelection(CameraController.RATIO_3_4)
@@ -357,6 +334,11 @@ class CameraFragment : Fragment() {
     }
 
     private fun setupQuickControls() {
+        binding.btnBrightness.setOnClickListener {
+            setupExposureSlider()
+            binding.sliderExposure.visibility = if (binding.sliderExposure.visibility == View.VISIBLE) View.GONE else View.VISIBLE
+            handler.removeCallbacks(exposureFadeRunnable)
+        }
         // 1. 격자 토글
         binding.btnGridToggle.setOnClickListener {
             val visible = binding.gridOverlayView.visibility == View.VISIBLE
@@ -540,7 +522,6 @@ class CameraFragment : Fragment() {
             controller.onZoomChanged = null
             controller.onError = null
             controller.onControlsApplied = null
-            controller.onFocusResult = null
             controller.detachPreview()
         }
 
