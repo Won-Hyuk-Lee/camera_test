@@ -40,6 +40,8 @@
         android:background="#33FFFFFF"
         app:layout_constraintTop_toBottomOf="@id/btnBack" />
 
+    <LinearLayout android:id="@+id/exportStatus" android:layout_width="0dp" android:layout_height="wrap_content" android:orientation="vertical" app:layout_constraintStart_toStartOf="parent" app:layout_constraintEnd_toEndOf="parent" app:layout_constraintTop_toBottomOf="@id/dividerTop" />
+
     <!-- 빈 상태 설명 뷰 -->
     <LinearLayout
         android:id="@+id/emptyView"
@@ -51,7 +53,7 @@
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toBottomOf="@id/dividerTop">
+        app:layout_constraintTop_toBottomOf="@id/exportStatus">
 
         <ImageView
             android:layout_width="64dp"
@@ -84,6 +86,6 @@
         android:layout_height="0dp"
         android:layout_marginTop="12dp"
         app:layout_constraintBottom_toBottomOf="parent"
-        app:layout_constraintTop_toBottomOf="@id/dividerTop" />
+        app:layout_constraintTop_toBottomOf="@id/exportStatus" />
 
 </androidx.constraintlayout.widget.ConstraintLayout>

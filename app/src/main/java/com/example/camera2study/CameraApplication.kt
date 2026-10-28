@@ -11,6 +11,7 @@ class CameraApplication : Application() {
         val executor = java.util.concurrent.Executors.newSingleThreadExecutor()
         executor.execute {
             RecordingJournal.recover(this)
+            com.example.camera2study.util.VaultExports.initialize(this)
             Handler(Looper.getMainLooper()).post {
                 if (RecordingRuntime.state.value?.active != true) {
                     if (RecordingJournal.recoveredInterruption && RecordingRuntime.state.value?.phase == RecordingPhase.IDLE) {

@@ -28,6 +28,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import com.example.camera2study.util.RecordingJournal
+import com.example.camera2study.util.VaultExports
 import com.example.camera2study.util.VideoFiles
 import com.example.camera2study.R
 import com.example.camera2study.databinding.FragmentPrivateVaultBinding
@@ -52,7 +53,6 @@ class PrivateVaultFragment : Fragment(), com.example.camera2study.EntryLockListe
     private var refreshKey = ""
     private var mediaFiles = ArrayList<File>()
     private val mediaInfo = mutableMapOf<String, VideoFiles.Info>()
-    private val exporting = mutableSetOf<String>()
     private lateinit var adapter: VaultAdapter
 
     override fun onCreateView(
@@ -71,6 +71,24 @@ class PrivateVaultFragment : Fragment(), com.example.camera2study.EntryLockListe
             parentFragmentManager.popBackStack()
         }
 
+        VaultExports.initialize(requireContext())
+        VaultExports.state.observe(viewLifecycleOwner) { jobs ->
+            binding.exportStatus.removeAllViews()
+            if (jobs.isNotEmpty()) {
+                binding.exportStatus.addView(TextView(requireContext()).apply {
+                    text = "내보내기 · 원본 유지 / 앱 종료 시 다음 실행에서 재시도"
+                    setTextColor(Color.WHITE); textSize = 14f
+                })
+                jobs.filter { it.busy || it.state != "COMPLETE" }.take(3).plus(jobs.filter { it.state == "COMPLETE" }.take(1)).forEach { job ->
+                    val status = when (job.state) { "QUEUED" -> "대기"; "COPYING" -> "복사"; "VERIFYING" -> "검증"; "COMPLETE" -> "완료"; "CANCELED" -> "취소"; else -> "실패" }
+                    binding.exportStatus.addView(android.widget.Button(requireContext()).apply {
+                        text = File(job.path).name + " · " + status + " " + (job.done * 100 / job.size.coerceAtLeast(1)) + "%" +
+                            if (job.busy) " · 취소" else if (job.state != "COMPLETE") " · 재시도: " + job.error else ""
+                        setOnClickListener { if (job.busy) VaultExports.cancel(job.id) else VaultExports.retry(job.id) }
+                    })
+                }
+            }
+        }
         setupRecyclerView()
         loadMediaFiles()
         com.example.camera2study.RecordingRuntime.state.observe(viewLifecycleOwner) { state ->
@@ -181,7 +199,7 @@ class PrivateVaultFragment : Fragment(), com.example.camera2study.EntryLockListe
 
     // --- 롱클릭 파일 관리 (내보내기 / 삭제) ---
     private fun showMediaManageOptions(file: File) {
-        if (file.absolutePath in RecordingJournal.activePaths || file.absolutePath in exporting) {
+        if (file.absolutePath in RecordingJournal.activePaths || VaultExports.isBusy(file.absolutePath)) {
             Toast.makeText(requireContext(), "기록 또는 내보내기 중인 파일은 변경할 수 없습니다", Toast.LENGTH_SHORT).show()
             return
         }
@@ -198,17 +216,9 @@ class PrivateVaultFragment : Fragment(), com.example.camera2study.EntryLockListe
     }
 
     private fun exportToPublicGallery(file: File) {
-        if (!exporting.add(file.absolutePath)) return
-        val ctx = requireContext().applicationContext
-        viewLifecycleOwner.lifecycleScope.launch {
-            try {
-                withContext(Dispatchers.IO) { VideoFiles.exportCopy(ctx, file) }
-                Toast.makeText(ctx, "갤러리에 복사했습니다. 보관함 원본은 유지됩니다", Toast.LENGTH_LONG).show()
-            } catch (e: Exception) {
-                if (e is kotlinx.coroutines.CancellationException) throw e
-                Toast.makeText(ctx, "내보내기 실패: ${e.message}", Toast.LENGTH_LONG).show()
-            } finally { exporting.remove(file.absolutePath) }
-        }
+        runCatching { VaultExports.enqueue(requireContext(), file) }
+            .onSuccess { Toast.makeText(requireContext(), "내보내기 목록에 추가했습니다. 같은 파일은 중복 복사하지 않습니다", Toast.LENGTH_LONG).show() }
+            .onFailure { Toast.makeText(requireContext(), it.message, Toast.LENGTH_LONG).show() }
     }
 
     private fun deleteMediaFile(file: File) {
@@ -216,11 +226,11 @@ class PrivateVaultFragment : Fragment(), com.example.camera2study.EntryLockListe
             .setTitle("영구 삭제")
             .setMessage("이 영상/사진을 비공개 보관함에서 완전히 영구 삭제하시겠습니까? 복구할 수 없습니다.")
             .setPositiveButton("삭제") { _, _ ->
-                if (file.absolutePath in RecordingJournal.activePaths || file.absolutePath in exporting) {
+                if (file.absolutePath in RecordingJournal.activePaths || VaultExports.isBusy(file.absolutePath)) {
                     Toast.makeText(requireContext(), "사용 중인 파일입니다", Toast.LENGTH_SHORT).show()
                     return@setPositiveButton
                 }
-                if (file.delete()) {
+                if (VaultExports.deleteSource(file)) {
                     Toast.makeText(requireContext(), "파일을 삭제했습니다.", Toast.LENGTH_SHORT).show()
                     loadMediaFiles()
                 } else {

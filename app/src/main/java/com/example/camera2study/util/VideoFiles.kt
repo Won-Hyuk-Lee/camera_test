@@ -25,7 +25,7 @@ object VideoFiles {
         finally { retriever.release() }
     }
 
-    fun exportCopy(context: Context, file: File) {
+    fun exportCopy(context: Context, file: File, created: (android.net.Uri) -> Unit = {}, progress: (Long, Long, Boolean) -> Unit = { _, _, _ -> }, canceled: () -> Boolean = { false }): android.net.Uri {
         check(file.absolutePath !in RecordingJournal.activePaths) { "기록 중인 파일입니다" }
         check(inspect(file).playable) { "재생 가능한 완료 파일만 내보낼 수 있습니다" }
         check(Build.VERSION.SDK_INT >= 29) { "Android 10 이상에서 갤러리 내보내기를 지원합니다" }
@@ -40,23 +40,32 @@ object VideoFiles {
         val collection = if (image) MediaStore.Images.Media.EXTERNAL_CONTENT_URI else MediaStore.Video.Media.EXTERNAL_CONTENT_URI
         val uri = checkNotNull(resolver.insert(collection, values)) { "갤러리 항목 생성 실패" }
         try {
+            created(uri)
             val expected = file.length()
             val copied = file.inputStream().use { input ->
-                checkNotNull(resolver.openOutputStream(uri, "w")) { "갤러리 쓰기 실패" }.use { output -> input.copyTo(output) }
+                checkNotNull(resolver.openOutputStream(uri, "w")) { "갤러리 쓰기 실패" }.use { output ->
+                    val buffer = ByteArray(1024 * 1024); var total = 0L
+                    while (true) {
+                        check(!canceled()) { "사용자 취소" }
+                        val n = input.read(buffer); if (n < 0) break
+                        output.write(buffer, 0, n); total += n; progress(total, expected, false)
+                    }; total
+                }
             }
             check(copied == expected && expected > 0L) { "복사 크기 불일치" }
             val actual = checkNotNull(resolver.openInputStream(uri)).use { input ->
                 val buffer = ByteArray(64 * 1024)
                 var total = 0L
-                while (true) { val n = input.read(buffer); if (n < 0) break; total += n }
+                while (true) { check(!canceled()) { "사용자 취소" }; val n = input.read(buffer); if (n < 0) break; total += n; progress(total, expected, true) }
                 total
             }
             check(actual == expected) { "갤러리 복사 검증 실패" }
             check(resolver.update(uri, ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING, 0) }, null, null) == 1)
         } catch (e: Exception) {
-            resolver.delete(uri, null, null)
+            runCatching { resolver.delete(uri, null, null) }
             throw e
         }
         // Export is a copy. The source always remains in the vault.
+        return uri
     }
 }
