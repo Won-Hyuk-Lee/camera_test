@@ -41,6 +41,11 @@ object RecordingJournal {
     fun begin(context: Context, source: String, settings: String): JSONObject {
         recover(context)
         return JSONObject().put("id", "${System.currentTimeMillis()}-${UUID.randomUUID().toString().take(8)}")
+            .put("schemaVersion", 2)
+            .put("environment", JSONObject().put("manufacturer", android.os.Build.MANUFACTURER).put("model", android.os.Build.MODEL)
+                .put("android", android.os.Build.VERSION.RELEASE).put("sdk", android.os.Build.VERSION.SDK_INT)
+                .put("appVersion", runCatching { context.packageManager.getPackageInfo(context.packageName, 0).versionName }.getOrNull()))
+            .put("resourcesStart", resourceSnapshot(context))
             .put("startedAt", System.currentTimeMillis()).put("source", source).put("settings", settings)
             .put("status", "ACTIVE").put("segments", JSONArray()).also { save(context, it) }
     }
@@ -66,11 +71,43 @@ object RecordingJournal {
     }
 
     fun finish(context: Context, session: JSONObject, error: String?, reason: String) {
-        session.put("status", if (error == null) "COMPLETE" else "ERROR")
+        session.put("resourcesEnd", resourceSnapshot(context))
+            .put("status", if (error == null) "COMPLETE" else "ERROR")
             .put("reason", reason).put("error", error ?: "").put("endedAt", System.currentTimeMillis())
         save(context, session)
     }
 
+    fun resourceSnapshot(context: Context): JSONObject {
+        val pm = context.getSystemService(android.os.PowerManager::class.java)
+        return JSONObject().put("time", System.currentTimeMillis())
+            .put("freeBytes", (context.getExternalFilesDir(null) ?: context.filesDir).usableSpace)
+            .put("thermalStatus", if (android.os.Build.VERSION.SDK_INT >= 29) pm.currentThermalStatus else -1)
+            .put("powerSave", pm.isPowerSaveMode)
+            .put("batteryPercent", context.getSystemService(android.os.BatteryManager::class.java).getIntProperty(android.os.BatteryManager.BATTERY_PROPERTY_CAPACITY))
+    }
+    fun sampleResources(context: Context, session: JSONObject) {
+        val samples = session.optJSONArray("resourceSamples") ?: JSONArray().also { session.put("resourceSamples", it) }
+        val last = if (samples.length() > 0) samples.getJSONObject(samples.length() - 1).optLong("time") else 0L
+        if (System.currentTimeMillis() - last < 15_000L) return
+        if (samples.length() >= 120) samples.remove(0)
+        samples.put(resourceSnapshot(context))
+    }
+    private fun readVideoInfo(context: Context, item: JSONObject) {
+        val retriever = android.media.MediaMetadataRetriever()
+        try {
+            val path = item.optString("path")
+            if (path.isNotBlank()) retriever.setDataSource(path)
+            else retriever.setDataSource(context, android.net.Uri.parse(item.optString("uri")))
+            val keys = mapOf("width" to 18, "height" to 19, "rotation" to 24, "durationMs" to 9, "frameCount" to 32, "captureFps" to 25)
+            val result = JSONObject()
+            keys.forEach { (name, key) -> retriever.extractMetadata(key)?.let { result.put(name, it) } }
+            val duration = result.optDouble("durationMs", 0.0)
+            val frames = result.optDouble("frameCount", 0.0)
+            if (duration > 0 && frames > 0) result.put("averageFps", frames * 1000 / duration)
+            item.put("actualVideo", result)
+        } catch (_: Exception) { item.put("fileUnavailable", true) }
+        finally { retriever.release() }
+    }
     @Synchronized fun save(context: Context, session: JSONObject) {
         val atomic = AtomicFile(File(directory(context), "${session.getString("id")}.json"))
         var stream: java.io.FileOutputStream? = null
@@ -95,13 +132,13 @@ object RecordingJournal {
         item.put("bytes", size ?: 0).put("sizeKnown", size != null)
     }
 
-    @Synchronized fun sessions(context: Context): List<JSONObject> = directory(context).listFiles()
+    fun sessions(context: Context): List<JSONObject> = directory(context).listFiles()
         ?.filter { it.extension == "json" }?.sortedByDescending { it.name }?.mapNotNull {
-            runCatching { JSONObject(AtomicFile(it).openRead().bufferedReader().use { reader -> reader.readText() }).also { session ->
+            runCatching { synchronized(this) { JSONObject(AtomicFile(it).openRead().bufferedReader().use { reader -> reader.readText() }) }.also { session ->
                 val files = session.getJSONArray("segments")
                 for (index in 0 until files.length()) {
                     val item = files.getJSONObject(index)
-                    if (item.optString("status") == "COMPLETE") refreshFileSize(context, item)
+                    if (item.optString("status") == "COMPLETE") { refreshFileSize(context, item); readVideoInfo(context, item) }
                 }
             } }.getOrNull()
         }.orEmpty()

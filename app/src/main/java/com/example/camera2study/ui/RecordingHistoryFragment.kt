@@ -91,7 +91,7 @@ class RecordingHistoryFragment : Fragment() {
                 text("${formatter.format(Date(session.optLong("startedAt")))} · ${status(session.optString("status"))}\n" +
                     "총 %02d:%02d · 완료 %d/%d개 · ".format(duration / 60_000, duration / 1000 % 60, complete, files.length()) +
                     (if (sizeKnown) "%.1f MiB".format(bytes / 1_048_576.0) else "용량 확인 필요") + "\n" +
-                    "시작: ${session.optString("source")} · 종료: ${session.optString("reason")}\n" +
+                    "시작: ${sourceLabel(session.optString("source"))} · 종료: ${reasonLabel(session.optString("reason"))}\n" +
                     session.optString("error") + "\n" + details.joinToString("\n"))
                 val privateFiles = (0 until files.length()).map { files.getJSONObject(it) }.filter { it.optString("path").isNotBlank() }
                 if (privateFiles.isNotEmpty()) button("이 촬영의 보관함 파일") {
@@ -118,6 +118,15 @@ class RecordingHistoryFragment : Fragment() {
         } catch (_: Exception) {
             Toast.makeText(requireContext(), "영상이 삭제되었거나 이동되어 열 수 없습니다", Toast.LENGTH_LONG).show()
         }
+    }
+    private fun sourceLabel(value: String) = when(value) {
+        "app" -> "일반 촬영"; "app_quick" -> "앱 빠른 녹화"; "widget" -> "홈 위젯"; "test" -> "10초 시험"; else -> value
+    }
+    private fun reasonLabel(value: String) = when(value) {
+        "user", "app" -> "촬영 화면에서 중지"; "widget" -> "홈 위젯에서 중지"; "notification" -> "알림에서 중지"
+        "file_limit" -> "설정한 파일 수 도달"; "time_limit" -> "설정한 총 시간 도달"; "resource_error" -> "기기 자원 부족"
+        "progress_timeout" -> "영상 기록 진행 없음"; "finalize_timeout" -> "저장 완료 응답 없음"; "start_rejected" -> "시작 조건 불충족"
+        "configuration_error", "preflight_error", "start_error" -> "촬영 준비 실패"; "recording_error" -> "촬영 오류"; else -> value
     }
     private fun status(value: String) = when (value) {
         "ACTIVE", "RECORDING" -> "기록 중"

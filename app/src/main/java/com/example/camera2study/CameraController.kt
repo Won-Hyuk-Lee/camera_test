@@ -692,6 +692,12 @@ class CameraController(private val context: Context) {
         if (released || isRecording()) return
         session = com.example.camera2study.util.RecordingJournal.begin(context, source,
             "camera=${activeCameraId()}, zoom=$zoomRatio, quality=$videoQuality, fps=$targetFps, hdr=$isHdrEnabled, ev=$exposureEv, audio=$audioEnabled, orientation=$orientationMode, mirror=$mirrorFront")
+        session?.let { journal ->
+            val bundle = com.example.camera2study.util.CameraSettingsStore.toBundle(com.example.camera2study.util.CameraSettingsStore.snapshot(context, this, com.example.camera2study.util.CameraSettingsStore.load(context, source != "app").colorTempK))
+            val config = org.json.JSONObject()
+            bundle.keySet().forEach { config.put(it, bundle.get(it)) }
+            journal.put("configuration", config)
+        }
         sessionFinished = false
         segmentEntry = null
         segmentDurationMs = 0
@@ -780,6 +786,7 @@ class CameraController(private val context: Context) {
                         val now = android.os.SystemClock.elapsedRealtime()
                         if (now - lastJournalAt > 5_000L) {
                             segmentEntry?.put("durationMs", segmentDurationMs)?.put("bytes", segmentBytes)
+                            com.example.camera2study.util.RecordingJournal.sampleResources(context, journal)
                             com.example.camera2study.util.RecordingJournal.save(context, journal)
                             lastJournalAt = now
                         }

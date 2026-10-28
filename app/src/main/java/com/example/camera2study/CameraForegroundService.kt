@@ -65,7 +65,7 @@ class CameraForegroundService : LifecycleService() {
             ACTION_QUICK_START -> {
                 val config = CameraSettingsStore.load(this, true)
                 request(if (intent.getBooleanExtra("test", false)) config.copy(maxDurationMs = 10_000,
-                    maxRepeatCount = 1, totalDurationMs = 0) else config, "widget")
+                    maxRepeatCount = 1, totalDurationMs = 0) else config, intent.getStringExtra("source") ?: "app_quick")
             }
             ACTION_START_RECORDING -> request(CameraSettingsStore.load(this), "app")
             ACTION_STOP_RECORDING -> stopBackgroundRecording(intent.getStringExtra("source") ?: "notification")
@@ -178,25 +178,25 @@ class CameraForegroundService : LifecycleService() {
         const val ACTION_QUICK_START = "com.example.camera2study.ACTION_QUICK_START"
         const val ACTION_START_RECORDING = "com.example.camera2study.ACTION_START_RECORDING"
         const val ACTION_STOP_RECORDING = "com.example.camera2study.ACTION_STOP_RECORDING"
-        fun requestQuickRecording(context: Context, test: Boolean = false) {
+        fun requestQuickRecording(context: Context, test: Boolean = false, source: String = "app_quick") {
             if (RecordingRuntime.state.value?.active == true) return
             // Reject unavailable permissions/resources before creating an FGS start obligation.
             // Android may terminate the process if a rejected service never enters foreground.
             val config = CameraSettingsStore.load(context, true)
             com.example.camera2study.util.CaptureHealth.problem(context, config.audioEnabled, true)?.let {
-                rejectQuickRecording(context, it)
+                rejectQuickRecording(context, it, source)
                 return
             }
             try {
                 ContextCompat.startForegroundService(context, Intent(context, CameraForegroundService::class.java).apply {
-                    action = ACTION_QUICK_START; putExtra("test", test)
+                    action = ACTION_QUICK_START; putExtra("test", test); putExtra("source", if (test) "test" else source)
                 })
             } catch (e: Exception) {
-                rejectQuickRecording(context, "빠른 녹화 요청 실패: ${e.message}")
+                rejectQuickRecording(context, "빠른 녹화 요청 실패: ${e.message}", source)
             }
         }
-        private fun rejectQuickRecording(context: Context, message: String) {
-            val journal = RecordingJournal.begin(context, "widget", "start_rejected")
+        private fun rejectQuickRecording(context: Context, message: String, source: String) {
+            val journal = RecordingJournal.begin(context, source, "start_rejected")
             RecordingJournal.finish(context, journal, message, "start_rejected")
             val state = RecordingState(RecordingPhase.ERROR, message = message)
             RecordingRuntime.state.value = state

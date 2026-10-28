@@ -17,7 +17,7 @@ class RecordingStopWidgetProvider : AppWidgetProvider() {
                 val now = SystemClock.elapsedRealtime()
                 if (now - lastStart < 1_000 || RecordingRuntime.state.value?.active == true) return
                 lastStart = now
-                CameraForegroundService.requestQuickRecording(context)
+                CameraForegroundService.requestQuickRecording(context, source = "widget")
             }
             STOP -> CameraForegroundService.requestStop(context)
             else -> super.onReceive(context, intent)
