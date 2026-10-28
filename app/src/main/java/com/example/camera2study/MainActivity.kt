@@ -10,6 +10,8 @@ import com.example.camera2study.databinding.ActivityMainBinding
 import com.example.camera2study.ui.CalculatorFragment
 import com.example.camera2study.ui.HomeFragment
 
+interface EntryLockListener { fun onEntryLocked() }
+
 class EntrySession : ViewModel() {
     var authenticated = false
     var resetEntry = true
@@ -57,6 +59,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun lockEntry() {
+        (supportFragmentManager.findFragmentById(R.id.container) as? EntryLockListener)?.onEntryLocked()
         entry.authenticated = false
         entry.resetEntry = true
         binding.root.visibility = View.INVISIBLE

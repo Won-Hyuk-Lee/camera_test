@@ -37,7 +37,13 @@ import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
 
-class PrivateVaultFragment : Fragment() {
+class PrivateVaultFragment : Fragment(), com.example.camera2study.EntryLockListener {
+    private val dialogs = mutableSetOf<android.app.Dialog>()
+    override fun onEntryLocked() {
+        dialogs.toList().forEach { it.dismiss() }
+        dialogs.clear()
+    }
+    override fun onStop() { onEntryLocked(); super.onStop() }
 
     private var _binding: FragmentPrivateVaultBinding? = null
     private val binding get() = _binding!!
@@ -165,6 +171,7 @@ class PrivateVaultFragment : Fragment() {
             }
         }
 
+        dialogs.add(dialog)
         dialog.show()
     }
 
@@ -183,7 +190,7 @@ class PrivateVaultFragment : Fragment() {
                     1 -> deleteMediaFile(file)
                 }
             }
-            .show()
+            .create().also { dialogs.add(it); it.show() }
     }
 
     private fun exportToPublicGallery(file: File) {
@@ -217,10 +224,11 @@ class PrivateVaultFragment : Fragment() {
                 }
             }
             .setNegativeButton("취소", null)
-            .show()
+            .create().also { dialogs.add(it); it.show() }
     }
 
     override fun onDestroyView() {
+        onEntryLocked()
         if (::adapter.isInitialized) adapter.close()
         super.onDestroyView()
         _binding = null
