@@ -465,6 +465,7 @@ class CameraFragment : Fragment() {
             }
             is VideoRecordEvent.Finalize -> {
                 if (!controller.isRecording()) {
+                    service?.restoreNormalProfile()
                     syncRecordingUi(false)
                 } else {
                     recordStartMs = SystemClock.elapsedRealtime()

@@ -74,7 +74,14 @@ class CameraForegroundService : LifecycleService() {
     }
     fun startFromUi() {
         if (controller.isRecording() || pending != null) return
-        request(CameraSettingsStore.snapshot(this, controller, CameraSettingsStore.load(this).colorTempK), "app")
+        val normal = CameraSettingsStore.load(this)
+        val config = if (source == "app") CameraSettingsStore.snapshot(this, controller, normal.colorTempK) else normal
+        request(config, "app")
+    }
+    fun restoreNormalProfile() {
+        if (source == "app" || controller.isRecording() || pending != null) return
+        source = "app"
+        CameraSettingsStore.applyToController(controller, CameraSettingsStore.load(this))
     }
     private fun request(settings: CameraSettings, origin: String) {
         if (controller.isRecording() || pending != null) return
