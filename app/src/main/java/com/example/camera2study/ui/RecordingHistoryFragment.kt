@@ -83,11 +83,30 @@ class RecordingHistoryFragment : Fragment() {
                     "총 %02d:%02d · 완료 %d/%d개 · %.1f MB\n".format(duration / 60_000, duration / 1000 % 60, complete, files.length(), bytes / 1_048_576.0) +
                     "시작: ${session.optString("source")} · 종료: ${session.optString("reason")}\n" +
                     session.optString("error") + "\n" + details.joinToString("\n"))
-                button("이 촬영의 보관함 파일") {
+                val privateFiles = (0 until files.length()).map { files.getJSONObject(it) }.filter { it.optString("path").isNotBlank() }
+                if (privateFiles.isNotEmpty()) button("이 촬영의 보관함 파일") {
                     val vault = PrivateVaultFragment().apply { arguments = Bundle().apply { putString("sessionId", session.getString("id")) } }
                     parentFragmentManager.beginTransaction().replace(R.id.container, vault).addToBackStack(null).commit()
                 }
+                for (i in 0 until files.length()) {
+                    val file = files.getJSONObject(i)
+                    if (file.optString("path").isBlank() && file.optString("uri").startsWith("content://")) {
+                        button((i + 1).toString() + ". 공개 저장 영상 열기") { openPublicVideo(file.optString("uri")) }
+                    }
+                }
             }
+        }
+    }
+    private fun openPublicVideo(value: String) {
+        val uri = android.net.Uri.parse(value)
+        try {
+            requireContext().contentResolver.openFileDescriptor(uri, "r")?.use { } ?: error("파일이 없습니다")
+            startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW).setDataAndType(uri, "video/mp4")
+                .addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION))
+        } catch (_: android.content.ActivityNotFoundException) {
+            Toast.makeText(requireContext(), "영상을 열 수 있는 갤러리 또는 플레이어가 필요합니다", Toast.LENGTH_LONG).show()
+        } catch (_: Exception) {
+            Toast.makeText(requireContext(), "영상이 삭제되었거나 이동되어 열 수 없습니다", Toast.LENGTH_LONG).show()
         }
     }
     private fun status(value: String) = when (value) {
