@@ -70,6 +70,7 @@ class CameraFragment : Fragment() {
             com.example.camera2study.RecordingRuntime.state.removeObservers(viewLifecycleOwner)
             com.example.camera2study.RecordingRuntime.state.observe(viewLifecycleOwner) { state ->
                 if (_binding != null) {
+                    binding.btnRecord.contentDescription = if (state.active) "녹화 중지" else "녹화 시작"
                     binding.btnSettings.isEnabled = !state.active
                     binding.btnSwitchFacing.isEnabled = !state.active
                     binding.txtTimer.text = formatElapsed(state.durationMs) + " · " + state.message

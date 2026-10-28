@@ -78,6 +78,7 @@ class PrivateVaultFragment : Fragment(), com.example.camera2study.EntryLockListe
         VaultExports.initialize(requireContext())
         VaultExports.state.observe(viewLifecycleOwner) { jobs ->
             binding.exportStatus.removeAllViews()
+            (binding.exportStatus.parent as View).visibility = if (jobs.isEmpty()) View.GONE else View.VISIBLE
             if (jobs.isNotEmpty()) {
                 binding.exportStatus.addView(TextView(requireContext()).apply {
                     text = "내보내기 · 원본 유지 / 앱 종료 시 다음 실행에서 재시도"

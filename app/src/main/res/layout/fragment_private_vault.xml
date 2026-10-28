@@ -13,7 +13,7 @@
         <Button android:id="@+id/deleteSelected" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:text="삭제"/>
     </LinearLayout>
     <TextView android:id="@+id/selectionSummary" android:layout_width="match_parent" android:layout_height="wrap_content" android:textSize="14sp" android:textColor="#CCCCCC"/>
-    <ScrollView android:layout_width="match_parent" android:layout_height="wrap_content" android:maxHeight="160dp">
+    <ScrollView android:layout_width="match_parent" android:layout_height="120dp" android:visibility="gone">
         <LinearLayout android:id="@+id/exportStatus" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical"/>
     </ScrollView>
     <TextView android:id="@+id/emptyView" android:layout_width="match_parent" android:layout_height="wrap_content" android:padding="16dp" android:text="표시할 영상이 없습니다" android:textColor="#FFFFFF" android:visibility="gone"/>

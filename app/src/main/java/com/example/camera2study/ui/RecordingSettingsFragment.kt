@@ -53,7 +53,8 @@ class RecordingSettingsFragment : Fragment() {
         val content = LinearLayout(ctx).apply {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(android.graphics.Color.rgb(18, 20, 25))
-            setPadding(24, 24, 24, 32)
+            val d = resources.displayMetrics.density
+            setPadding((16*d).toInt(),(16*d).toInt(),(16*d).toInt(),(24*d).toInt())
         }
         list = content
         return ScrollView(ctx).apply { isFillViewport = true; fitsSystemWindows = true; addView(content) }
@@ -79,6 +80,7 @@ class RecordingSettingsFragment : Fragment() {
         label(title)
         val spinner = Spinner(requireContext())
         spinner.contentDescription = title
+        spinner.minimumHeight = (48 * resources.displayMetrics.density).toInt()
         spinner.adapter = object : ArrayAdapter<String>(requireContext(), android.R.layout.simple_spinner_dropdown_item, options.map { it.first }) {
             override fun getView(position: Int, convertView: View?, parent: ViewGroup): View =
                 super.getView(position, convertView, parent).also { (it as TextView).setTextColor(android.graphics.Color.WHITE) }

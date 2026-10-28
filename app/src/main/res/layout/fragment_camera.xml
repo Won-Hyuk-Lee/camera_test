@@ -30,9 +30,9 @@
 
     <!-- 수직 AE 노출 보정 밝기 슬라이더 (평소에는 gone) -->
     <SeekBar
-        android:id="@+id/sliderExposure"
+        android:id="@+id/sliderExposure" android:contentDescription="노출 밝기 조절"
         android:layout_width="180dp"
-        android:layout_height="32dp"
+        android:layout_height="48dp"
         android:rotation="270"
         android:visibility="gone"
         android:max="20"
@@ -65,7 +65,7 @@
             android:layout_height="wrap_content"
             android:text="⚙ 상세설정"
             android:textColor="@android:color/white"
-            android:textSize="11sp" />
+            android:textSize="12sp" />
 
         <com.google.android.material.button.MaterialButton
             android:id="@+id/btnGridToggle"
@@ -75,7 +75,7 @@
             android:layout_height="wrap_content"
             android:text="📐 격자 OFF"
             android:textColor="@android:color/white"
-            android:textSize="11sp" />
+            android:textSize="12sp" />
         <com.google.android.material.button.MaterialButton
             android:id="@+id/btnBrightness" style="@style/Widget.Material3.Button.TextButton"
             android:layout_width="0dp" android:layout_height="48dp" android:layout_weight="1"
@@ -93,7 +93,7 @@
         android:background="#80000000"
         android:padding="6dp"
         android:textColor="@android:color/white"
-        android:textSize="10sp"
+        android:textSize="12sp"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toBottomOf="@id/topQuickBar" />
 
@@ -140,10 +140,10 @@
                 android:id="@+id/btnZoom06"
                 style="@style/Widget.Material3.Button.TextButton"
                 android:layout_width="64dp"
-                android:layout_height="36dp"
+                android:layout_height="48dp"
                 android:text="0.6x"
                 android:textColor="@android:color/white"
-                android:textSize="10sp"
+                android:textSize="12sp"
                 android:insetTop="0dp"
                 android:insetBottom="0dp"
                 android:padding="0dp" />
@@ -152,10 +152,10 @@
                 android:id="@+id/btnZoom10"
                 style="@style/Widget.Material3.Button.TextButton"
                 android:layout_width="64dp"
-                android:layout_height="36dp"
+                android:layout_height="48dp"
                 android:text="1.0x"
                 android:textColor="#FFC107"
-                android:textSize="10sp"
+                android:textSize="12sp"
                 android:insetTop="0dp"
                 android:insetBottom="0dp"
                 android:padding="0dp" />
@@ -163,12 +163,12 @@
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btnZoom20"
                 style="@style/Widget.Material3.Button.TextButton"
-                android:layout_width="44dp"
-                android:layout_height="36dp"
+                android:layout_width="48dp"
+                android:layout_height="48dp"
                 android:visibility="gone"
                 android:text="2x"
                 android:textColor="@android:color/white"
-                android:textSize="10sp"
+                android:textSize="12sp"
                 android:insetTop="0dp"
                 android:insetBottom="0dp"
                 android:padding="0dp" />
@@ -176,12 +176,12 @@
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btnZoom30"
                 style="@style/Widget.Material3.Button.TextButton"
-                android:layout_width="44dp"
-                android:layout_height="36dp"
+                android:layout_width="48dp"
+                android:layout_height="48dp"
                 android:visibility="gone"
                 android:text="3x"
                 android:textColor="@android:color/white"
-                android:textSize="10sp"
+                android:textSize="12sp"
                 android:insetTop="0dp"
                 android:insetBottom="0dp"
                 android:padding="0dp" />
@@ -189,12 +189,12 @@
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btnZoom50"
                 style="@style/Widget.Material3.Button.TextButton"
-                android:layout_width="44dp"
-                android:layout_height="36dp"
+                android:layout_width="48dp"
+                android:layout_height="48dp"
                 android:visibility="gone"
                 android:text="5x"
                 android:textColor="@android:color/white"
-                android:textSize="10sp"
+                android:textSize="12sp"
                 android:insetTop="0dp"
                 android:insetBottom="0dp"
                 android:padding="0dp" />
@@ -202,12 +202,12 @@
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btnZoom100"
                 style="@style/Widget.Material3.Button.TextButton"
-                android:layout_width="44dp"
-                android:layout_height="36dp"
+                android:layout_width="48dp"
+                android:layout_height="48dp"
                 android:visibility="gone"
                 android:text="10x"
                 android:textColor="@android:color/white"
-                android:textSize="10sp"
+                android:textSize="12sp"
                 android:insetTop="0dp"
                 android:insetBottom="0dp"
                 android:padding="0dp" />
@@ -247,8 +247,7 @@
             android:textColor="#8AFFFFFF"
             android:textSize="14sp"
             android:textStyle="bold"
-            android:clickable="true"
-            android:focusable="true" />
+            android:importantForAccessibility="no" />
     </LinearLayout>
 
     <!-- Pause/Resume 버튼 — 녹화 중일 때만 표시 -->
@@ -280,7 +279,7 @@
 
         <!-- 비공개 보관함 원형 썸네일 버튼 -->
         <com.google.android.material.card.MaterialCardView
-            android:id="@+id/btnPrivateVault"
+            android:id="@+id/btnPrivateVault" android:contentDescription="비공개 보관함 열기" android:focusable="true"
             android:layout_width="52dp"
             android:layout_height="52dp"
             android:layout_weight="0"
@@ -306,7 +305,7 @@
             android:layout_weight="1">
 
             <com.google.android.material.button.MaterialButton
-                android:id="@+id/btnRecord"
+                android:id="@+id/btnRecord" android:contentDescription="녹화 시작"
                 style="@style/Widget.Material3.Button.IconButton"
                 android:layout_width="76dp"
                 android:layout_height="76dp"
@@ -332,7 +331,7 @@
 
         <!-- 전후면 전환 둥근 회 화살표 버튼 -->
         <com.google.android.material.button.MaterialButton
-            android:id="@+id/btnSwitchFacing"
+            android:id="@+id/btnSwitchFacing" android:contentDescription="전면 후면 카메라 전환"
             style="@style/Widget.Material3.Button.IconButton"
             android:layout_width="52dp"
             android:layout_height="52dp"
