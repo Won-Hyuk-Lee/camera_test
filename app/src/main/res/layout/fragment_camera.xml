@@ -109,9 +109,12 @@
         android:textSize="14sp"
         android:textStyle="bold"
         app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toBottomOf="@id/topQuickBar" />
 
+    <LinearLayout android:id="@+id/captureSummary" android:layout_width="0dp" android:layout_height="wrap_content" android:orientation="vertical" android:padding="8dp" android:background="#B3000000" app:layout_constraintStart_toStartOf="parent" app:layout_constraintEnd_toEndOf="parent" app:layout_constraintTop_toBottomOf="@id/txtLensInfo">
+        <TextView android:id="@+id/txtCaptureSummary" android:layout_width="match_parent" android:layout_height="wrap_content" android:textColor="#FFFFFF" android:textSize="12sp" android:maxLines="3" android:ellipsize="end" android:minHeight="48dp" android:contentDescription="촬영 정보 상세 보기" android:clickable="true" android:focusable="true"/>
+        <Button android:id="@+id/btnCaptureResult" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="이번 촬영 결과" android:visibility="gone"/>
+    </LinearLayout>
     <!-- 5. 줌 다이얼 (S25 Ultra 기준 프리셋 0.6x/1x/2x/3x/5x/10x + 슬라이더) -->
     <LinearLayout
         android:id="@+id/zoomControlLayout"

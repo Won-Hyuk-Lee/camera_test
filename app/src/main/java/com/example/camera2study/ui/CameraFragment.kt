@@ -45,6 +45,9 @@ class CameraFragment : Fragment() {
 
     private var recordStartMs: Long = 0L
     private var pauseStartMs: Long = 0L
+    private var lastSummaryAt = 0L
+    private var summaryText = ""
+    private var resultSession = ""
     private val timerRunnable = object : Runnable {
         override fun run() {
             val binding = _binding ?: return
@@ -71,6 +74,7 @@ class CameraFragment : Fragment() {
             com.example.camera2study.RecordingRuntime.state.observe(viewLifecycleOwner) { state ->
                 if (_binding != null) {
                     binding.btnRecord.contentDescription = if (state.active) "녹화 중지" else "녹화 시작"
+                    updateCaptureSummary(state)
                     binding.btnSettings.isEnabled = !state.active
                     binding.btnSwitchFacing.isEnabled = !state.active
                     binding.txtTimer.text = formatElapsed(state.durationMs) + " · " + state.message
@@ -96,6 +100,7 @@ class CameraFragment : Fragment() {
 
             // 마지막 카메라 세팅 복원
             restoreCameraSettings()
+            updateCaptureSummary(controller.recordingState, true)
 
             // 자동 촬영 시작 (빠른 녹화 유입 시)
             val autoStart = arguments?.getBoolean("EXTRA_AUTO_START", false) ?: false
@@ -153,6 +158,12 @@ class CameraFragment : Fragment() {
         }
 
         binding.btnSettings.setOnClickListener { openSettings() }
+        binding.txtCaptureSummary.setOnClickListener {
+            com.google.android.material.dialog.MaterialAlertDialogBuilder(requireContext()).setTitle("촬영 정보").setMessage(summaryText).setPositiveButton("확인",null).show()
+        }
+        binding.btnCaptureResult.setOnClickListener {
+            navigateTo(RecordingHistoryFragment().apply { arguments = Bundle().apply { putString("sessionId",resultSession) } })
+        }
 
         binding.btnPrivateVault.setOnClickListener {
             navigateTo(PrivateVaultFragment())
@@ -429,6 +440,33 @@ class CameraFragment : Fragment() {
             }
             else -> Unit
         }
+    }
+
+    private fun updateCaptureSummary(state: com.example.camera2study.RecordingState, force: Boolean = false) {
+        if (_binding == null || !::controller.isInitialized) return
+        val now = SystemClock.elapsedRealtime()
+        if (!force && state.active && now - lastSummaryAt < 1500) return
+        lastSummaryAt = now
+        val free = (requireContext().getExternalFilesDir(null) ?: requireContext().filesDir).usableSpace
+        val look = com.example.camera2study.util.VideoLook.presets.first { it.id == controller.videoLook.normalized().preset }.name
+        val quality = when (controller.videoQuality) { Quality.UHD -> "4K"; Quality.FHD -> "1080p"; Quality.HD -> "720p"; else -> "SD" }
+        val destination = if (controller.isPrivateSave) "비공개 보관함" else "공개 갤러리"
+        val ending = if (controller.totalDurationMs > 0) "총 " + formatElapsed(controller.totalDurationMs)
+            else if (controller.maxRepeatCount > 0) "총 " + controller.maxRepeatCount + "개 파일" else "직접 중지까지"
+        val terminal = state.phase in listOf(com.example.camera2study.RecordingPhase.COMPLETED,com.example.camera2study.RecordingPhase.ERROR)
+        binding.btnCaptureResult.visibility = if (terminal && state.sessionId.isNotEmpty()) View.VISIBLE else View.GONE
+        resultSession = state.sessionId
+        val remaining = if (controller.totalDurationMs > 0 && state.active) " · 남은 시간 " + formatElapsed((controller.totalDurationMs - state.durationMs).coerceAtLeast(0)) else ""
+        val estimate = if (state.active && state.durationMs > 5000 && state.bytes > 0)
+            " · 저장공간 기준 약 " + ((free.toDouble() / state.bytes * state.durationMs) / 60000).toLong().coerceAtMost(9999) + "분" else ""
+        summaryText = if (terminal) "촬영 " + state.message + " · " + state.segment + "개 파일 · " + formatElapsed(state.durationMs) +
+            "\n이번 촬영 결과에서 실제 파일·용량·저장 위치를 확인하세요."
+        else quality + " · " + controller.targetFps + " FPS · " + (if (controller.isHdrEnabled) "HDR" else "SDR") + " · " +
+            (if (controller.audioEnabled) "마이크 켬" else "무음") + " · " + destination +
+            "\n" + look + " · 파일당 " + formatElapsed(controller.maxDurationMs) + " · " + ending +
+            (if (state.active) " · 현재 " + state.segment + "번째" else "") + remaining
+        summaryText += "\n여유 %.1f GiB".format(free / 1073741824.0) + estimate
+        binding.txtCaptureSummary.text = summaryText
     }
 
     private fun formatElapsed(ms: Long): String {

@@ -57,7 +57,7 @@ class RecordingHistoryFragment : Fragment() {
         val ctx = context ?: return
         val version = ++loadVersion
         viewLifecycleOwner.lifecycleScope.launch {
-            val sessions = withContext(Dispatchers.IO) { RecordingJournal.recover(ctx); RecordingJournal.sessions(ctx).take(100) }
+            val sessions = withContext(Dispatchers.IO) { RecordingJournal.recover(ctx); RecordingJournal.sessions(ctx).filter { session -> arguments?.getString("sessionId")?.let { session.optString("id") == it } ?: true }.take(100) }
             if (version != loadVersion) return@launch
             val container = list ?: return@launch
             container.removeAllViews()
