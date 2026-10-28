@@ -519,9 +519,7 @@ class CameraController(private val context: Context) {
     fun switchFacing() {
         if (isRecording()) return
         val saved = com.example.camera2study.util.CameraSettingsStore.loadForFacing(context, !isFacingBack())
-        exposureEv = saved.exposureEv
-        restoreCameraSelection(saved.lensFacingBack, saved.cameraId, saved.zoomRatio)
-        bindUseCases()
+        com.example.camera2study.util.CameraSettingsStore.applyToController(this, saved)
     }
 
     fun selectBackLens(cameraId: String) {

@@ -153,6 +153,7 @@ class CameraFragment : Fragment() {
                     repeatMode = ScaleAnimation.REVERSE
                 }
                 binding.btnSwitchFacing.startAnimation(scale)
+                manualColorTempK = CameraSettingsStore.loadForFacing(requireContext(), !controller.isFacingBack()).colorTempK
                 controller.switchFacing()
             }
         }
