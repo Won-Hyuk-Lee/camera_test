@@ -24,6 +24,7 @@ class SettingsFragment : Fragment() {
 
     private var _binding: FragmentSettingsBinding? = null
     private val binding get() = _binding!!
+    private var pinConfirmation: android.widget.EditText? = null
 
     private val permissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -105,6 +106,14 @@ class SettingsFragment : Fragment() {
             parentFragmentManager.beginTransaction().replace(com.example.camera2study.R.id.container, RecordingHistoryFragment())
                 .addToBackStack(null).commit()
         }
+        settingsParent.addView(android.widget.Button(requireContext()).apply {
+            text = "앱 사용 도움말"
+            setOnClickListener {
+                MaterialAlertDialogBuilder(requireContext()).setTitle("촬영과 보관함 사용법")
+                    .setMessage("진입: 계산기의 = 버튼을 길게 누릅니다. PIN을 켰다면 숫자 4자리로 인증합니다.\n\n일반 촬영과 빠른 녹화 설정은 따로 저장됩니다. 전면/후면별로 저장한 값이 복원됩니다. 변경 후 설정 저장을 누르세요.\n\n홈 화면 위젯 목록에서 계산기의 녹화 위젯을 추가하세요. 투명 1×1 영역을 누르면 시작하고 다시 누르면 중지합니다. 저장 중에는 잠시 기다리세요.\n\n파일당 길이는 분할 간격이며 전체 종료 조건은 직접 중지·총 파일 수·총 시간 중 선택합니다.\n\n비공개 영상은 보관함에서 확인하고 내보내기로 갤러리에 복사합니다. 원본은 유지됩니다. 앱 삭제 전 반드시 내보내세요.\n\nPIN은 복구할 수 없습니다. 앱 데이터 삭제는 PIN뿐 아니라 보관함 영상도 삭제하므로 주의하세요.")
+                    .setPositiveButton("확인",null).show()
+            }
+        })
         setupPinControls()
     }
 
@@ -112,21 +121,39 @@ class SettingsFragment : Fragment() {
         super.onResume()
         checkBatteryState()
         checkPermissionsState()
-        syncPinControls()
     }
 
     private fun setupPinControls() {
         syncPinControls()
+        val parent = binding.btnSavePin.parent as ViewGroup
+        pinConfirmation = android.widget.EditText(requireContext()).apply {
+            hint = "새 PIN 확인 · 숫자 4자리"; setHintTextColor(Color.LTGRAY); setTextColor(Color.WHITE)
+            inputType = android.text.InputType.TYPE_CLASS_NUMBER or android.text.InputType.TYPE_NUMBER_VARIATION_PASSWORD
+            filters = arrayOf(android.text.InputFilter.LengthFilter(4))
+            importantForAutofill = View.IMPORTANT_FOR_AUTOFILL_NO
+            minimumHeight = (48 * resources.displayMetrics.density).toInt()
+        }
+        parent.addView(pinConfirmation,parent.indexOfChild(binding.btnSavePin))
         binding.btnSavePin.setOnClickListener {
             val pin = binding.inputPinCode.text?.toString().orEmpty()
             val enabled = binding.switchPinLock.isChecked
 
+            if (enabled && pin.isEmpty() && SecurityPrefs.isPinEnabled(requireContext())) {
+                Toast.makeText(requireContext(), "기존 PIN을 유지합니다", Toast.LENGTH_SHORT).show()
+                pinConfirmation?.text?.clear()
+                return@setOnClickListener
+            }
             if (enabled) {
                 if (!SecurityPrefs.isValidPin(pin)) {
                     Toast.makeText(requireContext(), "PIN은 숫자 4자리로 입력하세요.", Toast.LENGTH_SHORT).show()
                     return@setOnClickListener
                 }
+                if (pin != pinConfirmation?.text?.toString()) {
+                    pinConfirmation?.error = "두 PIN이 일치하지 않습니다"
+                    return@setOnClickListener
+                }
                 SecurityPrefs.savePin(requireContext(), pin)
+                pinConfirmation?.text?.clear()
                 binding.inputPinCode.text?.clear()
                 Toast.makeText(requireContext(), "PIN 잠금이 활성화되었습니다.", Toast.LENGTH_SHORT).show()
             } else {
