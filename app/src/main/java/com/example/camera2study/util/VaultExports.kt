@@ -10,100 +10,189 @@ import org.json.JSONObject
 import java.io.File
 import java.util.concurrent.Executors
 
-/** Persisted application-owned queue. Process interruption resumes when the app next opens. */
+/** Application-owned copy queue. Cancellation is durable before it is acknowledged to the UI. */
 object VaultExports {
     data class Job(val id: String, val path: String, val size: Long, val modified: Long,
         val state: String = "QUEUED", val done: Long = 0, val uri: String = "", val error: String = "") {
-        val busy get() = state in listOf("QUEUED", "COPYING", "VERIFYING")
+        val busy get() = state in listOf("QUEUED", "COPYING", "VERIFYING", "CANCEL_REQUESTED")
+        val cancelRequested get() = state == "CANCEL_REQUESTED" || state == "CANCELED"
     }
     val state = MutableLiveData<List<Job>>(emptyList())
     private val lock = Any()
     private val worker = Executors.newSingleThreadExecutor()
     private val jobs = linkedMapOf<String, Job>()
-    private val canceled = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
     private var context: Context? = null
     private lateinit var journal: AtomicFile
+
     fun initialize(ctx: Context) = synchronized(lock) {
         if (context != null) return@synchronized
         context = ctx.applicationContext
-        journal = AtomicFile(File(ctx.filesDir,"vault_exports.json"))
+        journal = AtomicFile(File(ctx.filesDir, "vault_exports.json"))
         runCatching {
             val array = JSONArray(journal.openRead().bufferedReader().use { it.readText() })
             for (i in 0 until array.length()) {
                 val j = array.getJSONObject(i)
-                val job = Job(j.getString("id"),j.getString("path"),j.getLong("size"),j.getLong("modified"),
-                    j.getString("state"),j.optLong("done"),j.optString("uri"),j.optString("error"))
+                val job = Job(j.getString("id"), j.getString("path"), j.getLong("size"), j.getLong("modified"),
+                    j.getString("state"), j.optLong("done"), j.optString("uri"), j.optString("error"))
                 jobs[job.id] = job
             }
         }
         publish()
+        // Cancellation is resumed only to remove its pending public row, never to copy.
         jobs.values.filter { it.busy }.toList().forEach { worker.execute { perform(it.id) } }
     }
+
     fun enqueue(ctx: Context, file: File): String = synchronized(lock) {
         initialize(ctx)
         check(file.absolutePath !in RecordingJournal.activePaths) { "기록 중인 파일입니다" }
+        check(file.isFile) { "원본 파일이 없습니다" }
         jobs.values.firstOrNull { it.path == file.absolutePath && it.size == file.length() && it.modified == file.lastModified() &&
             (it.busy || (it.state == "COMPLETE" && published(it))) }?.let { return@synchronized it.id }
-        val job = Job(java.util.UUID.randomUUID().toString(),file.absolutePath,file.length(),file.lastModified())
-        jobs[job.id] = job; persist(); publish()
-        worker.execute { perform(job.id) }; job.id
+        val job = Job(java.util.UUID.randomUUID().toString(), file.absolutePath, file.length(), file.lastModified())
+        replace(job)
+        worker.execute { perform(job.id) }
+        job.id
     }
+
     fun isBusy(path: String) = synchronized(lock) { jobs.values.any { it.path == path && it.busy } }
     fun deleteSource(file: File): Boolean = synchronized(lock) {
         if (isBusy(file.absolutePath) || file.absolutePath in RecordingJournal.activePaths) false else file.delete()
     }
-    fun cancel(id: String) { canceled.add(id) }
+
+    /** A completed publication wins the race. Cancellation never deletes a completed export. */
+    fun cancel(id: String): Boolean = synchronized(lock) {
+        val job = jobs[id] ?: return@synchronized false
+        if (!job.busy || job.cancelRequested) return@synchronized false
+        replace(job.copy(state = "CANCEL_REQUESTED", error = ""))
+        worker.execute { perform(id) }
+        true
+    }
+
     fun retry(id: String) = synchronized(lock) {
         val job = jobs[id] ?: return@synchronized
+        if (job.state == "CANCEL_REQUESTED") {
+            worker.execute { perform(id) }
+            return@synchronized
+        }
         if (job.busy || job.state == "COMPLETE") return@synchronized
-        canceled.remove(id); jobs[id] = job.copy(state = "QUEUED",error = "",done = 0)
-        persist(); publish(); worker.execute { perform(id) }
+        replace(job.copy(state = "QUEUED", error = "", done = 0))
+        worker.execute { perform(id) }
     }
-    private fun update(id: String, change: (Job) -> Job) = synchronized(lock) {
-        jobs[id]?.let { jobs[id] = change(it) }; persist(); publish()
+
+    /** Called with lock held. Roll back memory too when durable state cannot be written. */
+    private fun replace(job: Job) {
+        val previous = jobs.put(job.id, job)
+        try { persist() } catch (error: Exception) {
+            if (previous == null) jobs.remove(job.id) else jobs[job.id] = previous
+            throw error
+        }
+        publish()
     }
+
+    private fun canceled(id: String) = synchronized(lock) { jobs[id]?.cancelRequested != false }
+
     private fun perform(id: String) {
         val ctx = context ?: return
         val initial = synchronized(lock) { jobs[id] } ?: return
+        if (!initial.busy) return
         try {
-            // Publication may have succeeded just before a process interruption.
-            if (initial.uri.isNotEmpty() && published(initial)) {
-                update(id) { it.copy(state = "COMPLETE",done = it.size) }; return
+            if (initial.cancelRequested) { finishCancellation(id); return }
+            synchronized(lock) {
+                val job = jobs[id] ?: return
+                check(!job.cancelRequested) { "사용자 취소" }
+                // Publication may have succeeded immediately before process interruption.
+                if (job.uri.isNotEmpty() && published(job)) {
+                    replace(job.copy(state = "COMPLETE", done = job.size, error = ""))
+                    return
+                }
             }
-            if (initial.uri.isNotEmpty()) runCatching { ctx.contentResolver.delete(Uri.parse(initial.uri),null,null) }
-            check(!canceled.contains(id)) { "사용자 취소" }
+            if (initial.uri.isNotEmpty()) deleteOutput(initial.uri)
             val file = File(initial.path)
             check(file.isFile && file.length() == initial.size && file.lastModified() == initial.modified) { "원본 파일이 삭제되거나 변경됐습니다" }
-            update(id) { it.copy(state = "COPYING",uri = "",done = 0,error = "") }
+            synchronized(lock) {
+                val job = jobs[id] ?: return
+                check(!job.cancelRequested) { "사용자 취소" }
+                replace(job.copy(state = "COPYING", uri = "", done = 0, error = ""))
+            }
             var last = 0L
-            val uri = VideoFiles.exportCopy(ctx,file,
-                created = { uri -> update(id) { it.copy(uri = uri.toString()) } },
-                progress = { done,total,verify ->
+            VideoFiles.exportCopy(ctx, file,
+                created = { uri -> synchronized(lock) {
+                    val job = jobs[id] ?: error("내보내기 작업이 없습니다")
+                    // Keep the URI even if cancellation won during MediaStore insertion.
+                    replace(job.copy(uri = uri.toString()))
+                } },
+                progress = { done, total, verify ->
                     val now = android.os.SystemClock.elapsedRealtime()
                     if (now - last > 400 || done == total) {
-                        last = now; update(id) { it.copy(state = if (verify) "VERIFYING" else "COPYING",done = done) }
+                        last = now
+                        synchronized(lock) {
+                            val job = jobs[id] ?: error("내보내기 작업이 없습니다")
+                            check(!job.cancelRequested) { "사용자 취소" }
+                            replace(job.copy(state = if (verify) "VERIFYING" else "COPYING", done = done))
+                        }
                     }
-                }, canceled = { canceled.contains(id) })
-            update(id) { it.copy(state = "COMPLETE",done = it.size,uri = uri.toString()) }
-        } catch (e: Exception) {
-            update(id) { it.copy(state = if (canceled.contains(id)) "CANCELED" else "ERROR",error = e.message.orEmpty()) }
+                }, canceled = { canceled(id) },
+                commitPublication = { uri, publish -> synchronized(lock) {
+                    val job = jobs[id] ?: error("내보내기 작업이 없습니다")
+                    check(!job.cancelRequested) { "사용자 취소" }
+                    publish()
+                    replace(job.copy(state = "COMPLETE", done = job.size, uri = uri.toString(), error = ""))
+                } })
+        } catch (error: Exception) {
+            runCatching {
+                val needsCleanup = synchronized(lock) {
+                    val job = jobs[id] ?: return@synchronized false
+                    if (job.cancelRequested) true else {
+                        replace(job.copy(state = "ERROR", error = error.message.orEmpty()))
+                        false
+                    }
+                }
+                if (needsCleanup) finishCancellation(id)
+            }.onFailure { android.util.Log.e("VaultExports", "Cannot save export result", it) }
         }
     }
+
+    private fun finishCancellation(id: String) {
+        val job = synchronized(lock) { jobs[id] } ?: return
+        if (!job.cancelRequested) return
+        try {
+            if (job.uri.isNotEmpty()) deleteOutput(job.uri)
+            synchronized(lock) {
+                jobs[id]?.takeIf { it.cancelRequested }?.let {
+                    replace(it.copy(state = "CANCELED", uri = "", done = 0, error = "사용자 취소"))
+                }
+            }
+        } catch (error: Exception) {
+            synchronized(lock) {
+                jobs[id]?.let { replace(it.copy(state = "CANCEL_REQUESTED", error = "공개 항목 정리 실패: ${error.message}")) }
+            }
+        }
+    }
+
+    private fun deleteOutput(value: String) {
+        val resolver = context!!.contentResolver
+        val uri = Uri.parse(value)
+        if (resolver.delete(uri, null, null) == 0) {
+            val exists = resolver.query(uri, arrayOf(MediaStore.MediaColumns._ID), null, null, null)?.use { it.moveToFirst() } == true
+            check(!exists) { "내보내기 항목을 삭제할 수 없습니다" }
+        }
+    }
+
     private fun published(job: Job): Boolean = runCatching {
         if (job.uri.isEmpty()) return false
         val resolver = context!!.contentResolver
         if (resolver.openFileDescriptor(Uri.parse(job.uri), "r")?.use { it.statSize == job.size } != true) return false
-        resolver.query(Uri.parse(job.uri),arrayOf(MediaStore.MediaColumns.SIZE,MediaStore.MediaColumns.IS_PENDING),null,null,null)?.use {
+        resolver.query(Uri.parse(job.uri), arrayOf(MediaStore.MediaColumns.SIZE, MediaStore.MediaColumns.IS_PENDING), null, null, null)?.use {
             it.moveToFirst() && it.getLong(0) == job.size && it.getInt(1) == 0
         } == true
     }.getOrDefault(false)
     private fun publish() { state.postValue(jobs.values.toList().reversed()) }
     private fun persist() {
         val array = JSONArray()
-        jobs.values.forEach { j -> array.put(JSONObject().put("id",j.id).put("path",j.path).put("size",j.size)
-            .put("modified",j.modified).put("state",j.state).put("done",j.done).put("uri",j.uri).put("error",j.error)) }
+        jobs.values.forEach { j -> array.put(JSONObject().put("id", j.id).put("path", j.path).put("size", j.size)
+            .put("modified", j.modified).put("state", j.state).put("done", j.done).put("uri", j.uri).put("error", j.error)) }
         val output = journal.startWrite()
         try { output.write(array.toString().toByteArray()); journal.finishWrite(output) }
-        catch (e: Exception) { journal.failWrite(output); throw e }
+        catch (error: Exception) { journal.failWrite(output); throw error }
     }
 }
