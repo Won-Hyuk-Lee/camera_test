@@ -27,9 +27,14 @@ import com.example.camera2study.util.CameraSettingsStore.CameraSettings
 class RecordingSettingsFragment : Fragment(), EntryLockListener {
     private val quick get() = arguments?.getBoolean("quick", false) == true
     private var baseline = CameraSettings()
+    private var savedFacingBack = true
     private var statusLabel: TextView? = null
     private var draft = CameraSettings()
-        set(value) { field = value; statusLabel?.text = if (value == baseline) "저장된 설정" else "미저장 변경 · 저장 후 다음 촬영에 적용" }
+        set(value) { field = value; updateSavedStatus() }
+    private fun hasUnsavedChanges() = draft != baseline || draft.lensFacingBack != savedFacingBack
+    private fun updateSavedStatus() {
+        statusLabel?.text = if (hasUnsavedChanges()) "미저장 변경 · 저장 후 다음 촬영에 적용" else "저장된 설정"
+    }
     private var list: LinearLayout? = null
     private var provider: ProcessCameraProvider? = null
     private var ready = false
@@ -47,16 +52,21 @@ class RecordingSettingsFragment : Fragment(), EntryLockListener {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        baseline = CameraSettingsStore.load(requireContext(), quick)
+        val saved = CameraSettingsStore.load(requireContext(), quick)
+        savedFacingBack = savedInstanceState?.getBoolean("savedFacingBack", saved.lensFacingBack) ?: saved.lensFacingBack
         requireActivity().onBackPressedDispatcher.addCallback(this, object : androidx.activity.OnBackPressedCallback(true) {
             override fun handleOnBackPressed() { leave() }
         })
         draft = savedInstanceState?.getBundle("draft")?.let(CameraSettingsStore::fromBundle)
-            ?: CameraSettingsStore.load(requireContext(), quick)
+            ?: saved
+        baseline = savedInstanceState?.getBundle("baseline")?.let(CameraSettingsStore::fromBundle)
+            ?: CameraSettingsStore.loadForFacing(requireContext(), draft.lensFacingBack, quick)
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
         outState.putBundle("draft", CameraSettingsStore.toBundle(draft))
+        outState.putBundle("baseline", CameraSettingsStore.toBundle(baseline))
+        outState.putBoolean("savedFacingBack", savedFacingBack)
         super.onSaveInstanceState(outState)
     }
 
@@ -132,7 +142,8 @@ class RecordingSettingsFragment : Fragment(), EntryLockListener {
         val scrollY = scroll?.scrollY ?: 0
         container.removeAllViews()
         button("뒤로") { leave() }
-        statusLabel = label(if (draft == baseline) "저장된 설정" else "미저장 변경 · 저장 후 다음 촬영에 적용")
+        statusLabel = label("")
+        updateSavedStatus()
         button("이 프로필 기본값으로 초기화") {
             showDialog(com.google.android.material.dialog.MaterialAlertDialogBuilder(requireContext()).setTitle("설정 초기화")
                 .setMessage("현재 전면/후면 프로필을 기본값으로 되돌립니다. 설정 저장을 눌러야 적용됩니다.")
@@ -226,7 +237,8 @@ class RecordingSettingsFragment : Fragment(), EntryLockListener {
         if (!authenticated()) return false
         CameraSettingsStore.save(requireContext(), draft, quick)
         baseline = draft
-        statusLabel?.text = "저장된 설정"
+        savedFacingBack = draft.lensFacingBack
+        updateSavedStatus()
         return true
     }
     private fun switchFacing(back: Boolean) {
@@ -235,7 +247,7 @@ class RecordingSettingsFragment : Fragment(), EntryLockListener {
     }
     private fun leave() {
         if (!authenticated()) return
-        if (draft == baseline) { parentFragmentManager.popBackStack(); return }
+        if (!hasUnsavedChanges()) { parentFragmentManager.popBackStack(); return }
         showDialog(com.google.android.material.dialog.MaterialAlertDialogBuilder(requireContext()).setTitle("미저장 설정")
             .setMessage("변경한 설정을 저장할까요?")
             .setPositiveButton("저장 후 나가기") { _, _ -> if (saveDraft()) parentFragmentManager.popBackStack() }
