@@ -12,6 +12,7 @@ object VideoFiles {
 
     fun inspect(file: File): Info {
         if (file.absolutePath in RecordingJournal.activePaths) return Info("기록 중", false)
+        if (!file.isFile) return Info("원본 파일 없음", false)
         if (file.length() == 0L) return Info("확인 필요 · 0바이트", false)
         if (file.extension == "jpg") return Info("기존 사진", true)
         val retriever = MediaMetadataRetriever()
@@ -19,7 +20,7 @@ object VideoFiles {
             retriever.setDataSource(file.absolutePath)
             val duration = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0
             val video = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_HAS_VIDEO) == "yes"
-            if (video && duration > 0) Info("완료 · %02d:%02d".format(duration / 60_000, duration / 1_000 % 60), true, duration)
+            if (video && duration > 0) Info("저장 완료 · %02d:%02d · 시간정보 검사 전".format(duration / 60_000, duration / 1_000 % 60), true, duration)
             else Info("확인 필요 · 영상 정보 없음", false)
         } catch (_: Exception) { Info("확인 필요 · 재생 정보 손상", false) }
         finally { retriever.release() }
