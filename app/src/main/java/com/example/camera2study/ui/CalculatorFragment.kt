@@ -1,34 +1,24 @@
 package com.example.camera2study.ui
 
 import android.os.Bundle
-import android.os.Handler
-import android.os.Looper
 import android.view.LayoutInflater
-import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import androidx.fragment.app.Fragment
 import com.example.camera2study.R
 import com.example.camera2study.databinding.FragmentCalculatorBinding
 import com.example.camera2study.util.SecurityPrefs
+import com.example.camera2study.util.CalculatorNumber
 import com.google.android.material.button.MaterialButton
-import kotlin.math.abs
 
 class CalculatorFragment : Fragment() {
 
     private var _binding: FragmentCalculatorBinding? = null
     private val binding get() = _binding!!
 
-    private val handler = Handler(Looper.getMainLooper())
     private var pendingOperator: String? = null
     private var storedValue: Double? = null
     private var resetInput = false
-    private var unlockTriggered = false
-
-    private val unlockRunnable = Runnable {
-        unlockTriggered = true
-        openProtectedEntry()
-    }
 
     override fun onCreateView(
         inflater: LayoutInflater,
@@ -71,30 +61,10 @@ class CalculatorFragment : Fragment() {
     }
 
     private fun setupEqualsButton(button: MaterialButton) {
-        button.setOnTouchListener { view, event ->
-            when (event.actionMasked) {
-                MotionEvent.ACTION_DOWN -> {
-                    unlockTriggered = false
-                    handler.postDelayed(unlockRunnable, 2000L)
-                    view.isPressed = true
-                    true
-                }
-                MotionEvent.ACTION_UP -> {
-                    handler.removeCallbacks(unlockRunnable)
-                    view.isPressed = false
-                    if (!unlockTriggered) {
-                        view.performClick()
-                        calculateResult()
-                    }
-                    true
-                }
-                MotionEvent.ACTION_CANCEL -> {
-                    handler.removeCallbacks(unlockRunnable)
-                    view.isPressed = false
-                    true
-                }
-                else -> true
-            }
+        button.setOnClickListener { calculateResult() }
+        button.setOnLongClickListener {
+            if (isResumed) openProtectedEntry()
+            true
         }
     }
 
@@ -153,7 +123,7 @@ class CalculatorFragment : Fragment() {
             binding.txtCalcDisplay.text = "Error"
             resetInput = true
         } else {
-            binding.txtCalcDisplay.text = formatResult(result)
+            binding.txtCalcDisplay.text = CalculatorNumber.format(result)
         }
     }
 
@@ -176,16 +146,6 @@ class CalculatorFragment : Fragment() {
     private fun readDisplayValue(): Double =
         binding.txtCalcDisplay.text.toString().toDoubleOrNull() ?: 0.0
 
-    private fun formatResult(value: Double): String {
-        if (value.isNaN() || value.isInfinite()) return "Error"
-        val rounded = if (abs(value % 1.0) < 0.000000001) {
-            value.toLong().toString()
-        } else {
-            "%.8f".format(value).trimEnd('0').trimEnd('.')
-        }
-        return if (rounded.length > 12) "%.6e".format(value) else rounded
-    }
-
     private fun openProtectedEntry() {
         if (!SecurityPrefs.isPinEnabled(requireContext())) {
             (requireActivity() as com.example.camera2study.MainActivity).unlockEntry()
@@ -202,7 +162,6 @@ class CalculatorFragment : Fragment() {
     }
 
     override fun onDestroyView() {
-        handler.removeCallbacks(unlockRunnable)
         _binding = null
         super.onDestroyView()
     }
