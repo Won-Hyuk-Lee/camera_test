@@ -25,6 +25,7 @@ import androidx.core.content.ContextCompat
 import androidx.fragment.app.Fragment
 import com.example.camera2study.CameraController
 import com.example.camera2study.CameraForegroundService
+import com.example.camera2study.EntryLockListener
 import com.example.camera2study.R
 import com.example.camera2study.databinding.FragmentCameraBinding
 import com.example.camera2study.util.CameraUtils
@@ -32,7 +33,7 @@ import com.example.camera2study.util.CameraSettingsStore
 import com.google.android.material.button.MaterialButton
 import java.io.File
 
-class CameraFragment : Fragment() {
+class CameraFragment : Fragment(), EntryLockListener {
 
     private var _binding: FragmentCameraBinding? = null
     private val binding get() = _binding!!
@@ -100,10 +101,7 @@ class CameraFragment : Fragment() {
                 context?.let { Toast.makeText(it, message, Toast.LENGTH_LONG).show() }
             }
 
-            // 프리뷰 뷰 부착
-            if (viewLifecycleOwner.lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.STARTED)) {
-                controller.attachPreview(binding.previewView)
-            }
+            attachVisiblePreview()
 
             // UI 및 리스너 설정
             setupZoomListeners()
@@ -521,9 +519,25 @@ class CameraFragment : Fragment() {
         binding.previewView.post { fitPreview() }
     }
 
-    override fun onStart() {
-        super.onStart()
-        if (::controller.isInitialized && _binding != null) controller.attachPreview(binding.previewView)
+    private fun attachVisiblePreview() {
+        val preview = _binding?.previewView ?: return
+        // A phone or lock screen transition can resume this fragment while the entry gate still hides it.
+        if (isResumed && preview.isShown && ::controller.isInitialized) {
+            controller.attachPreview(preview)
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        attachVisiblePreview()
+    }
+
+    override fun onEntryUnlocked() {
+        attachVisiblePreview()
+    }
+
+    override fun onEntryLocked() {
+        if (::controller.isInitialized) controller.detachPreview()
     }
 
     override fun onStop() {

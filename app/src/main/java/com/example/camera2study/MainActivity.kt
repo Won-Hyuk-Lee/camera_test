@@ -10,7 +10,10 @@ import com.example.camera2study.databinding.ActivityMainBinding
 import com.example.camera2study.ui.CalculatorFragment
 import com.example.camera2study.ui.HomeFragment
 
-interface EntryLockListener { fun onEntryLocked() }
+interface EntryLockListener {
+    fun onEntryLocked()
+    fun onEntryUnlocked() {}
+}
 class EntrySession : ViewModel() {
     var authenticated = false
     var resetEntry = true
@@ -58,6 +61,7 @@ class MainActivity : AppCompatActivity() {
             supportFragmentManager.beginTransaction().replace(R.id.container, HomeFragment()).commitNow()
         }
         showProtection(false)
+        (supportFragmentManager.findFragmentById(R.id.container) as? EntryLockListener)?.onEntryUnlocked()
     }
     override fun onStop() {
         if (!isChangingConfigurations) lockEntry()

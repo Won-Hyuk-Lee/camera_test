@@ -234,11 +234,12 @@ class CameraController(private val context: Context) {
     }
 
     fun attachPreview(view: PreviewView) {
-        if (released) return
+        if (released || previewView === view) return
         previewView = view
         previewUseCase?.setSurfaceProvider(view.surfaceProvider)
     }
     fun detachPreview() {
+        if (previewView == null) return
         previewView = null
         // Keep the use-case group and video crop stable while the screen is closed.
         previewUseCase?.setSurfaceProvider(null)
