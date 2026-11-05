@@ -19,12 +19,29 @@ import com.example.camera2study.databinding.FragmentSettingsBinding
 import com.example.camera2study.util.PermissionHelper
 import com.example.camera2study.util.SecurityPrefs
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
+import com.example.camera2study.EntryLockListener
+import com.example.camera2study.MainActivity
 
-class SettingsFragment : Fragment() {
+class SettingsFragment : Fragment(), EntryLockListener {
 
     private var _binding: FragmentSettingsBinding? = null
     private val binding get() = _binding!!
     private var pinConfirmation: android.widget.EditText? = null
+    private val dialogs = mutableSetOf<android.app.Dialog>()
+    private fun authenticated() = (activity as? MainActivity)?.isEntryAuthenticated() == true
+    private fun showDialog(builder: MaterialAlertDialogBuilder) {
+        if (!authenticated()) return
+        val dialog = builder.create()
+        dialogs.add(dialog)
+        dialog.setOnDismissListener { dialogs.remove(dialog) }
+        dialog.show()
+    }
+    override fun onEntryLocked() {
+        dialogs.toList().forEach { it.dismiss() }
+        bindingOrNull()?.inputPinCode?.text?.clear()
+        pinConfirmation?.text?.clear()
+    }
+    private fun bindingOrNull() = _binding
 
     private val permissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -45,7 +62,7 @@ class SettingsFragment : Fragment() {
         super.onViewCreated(view, savedInstanceState)
 
         binding.btnBack.setOnClickListener {
-            parentFragmentManager.popBackStack()
+            if (authenticated()) parentFragmentManager.popBackStack()
         }
 
         binding.btnGoBatterySettings.setOnClickListener {
@@ -93,6 +110,7 @@ class SettingsFragment : Fragment() {
             text = "앱 화면 캡처 차단 (선택)"; setTextColor(Color.WHITE)
             isChecked = SecurityPrefs.blockScreenCapture(requireContext())
             setOnCheckedChangeListener { _, value ->
+                if (!authenticated()) return@setOnCheckedChangeListener
                 SecurityPrefs.setBlockScreenCapture(requireContext(), value)
                 (requireActivity() as com.example.camera2study.MainActivity).refreshScreenProtection()
             }
@@ -109,9 +127,9 @@ class SettingsFragment : Fragment() {
         settingsParent.addView(android.widget.Button(requireContext()).apply {
             text = "앱 사용 도움말"
             setOnClickListener {
-                MaterialAlertDialogBuilder(requireContext()).setTitle("촬영과 보관함 사용법")
+                showDialog(MaterialAlertDialogBuilder(requireContext()).setTitle("촬영과 보관함 사용법")
                     .setMessage("진입: 계산기의 = 버튼을 길게 누릅니다. PIN을 켰다면 숫자 4자리로 인증합니다.\n\n일반 촬영과 빠른 녹화 설정은 따로 저장됩니다. 전면/후면별로 저장한 값이 복원됩니다. 변경 후 설정 저장을 누르세요.\n\n홈 화면 위젯 목록에서 계산기의 녹화 위젯을 추가하세요. 투명 1×1 영역을 누르면 시작하고 다시 누르면 중지합니다. 저장 중에는 잠시 기다리세요.\n\n파일당 길이는 분할 간격이며 전체 종료 조건은 직접 중지·총 파일 수·총 시간 중 선택합니다.\n\n비공개 영상은 보관함에서 확인하고 내보내기로 갤러리에 복사합니다. 원본은 유지됩니다. 앱 삭제 전 반드시 내보내세요.\n\nPIN은 복구할 수 없습니다. 앱 데이터 삭제는 PIN뿐 아니라 보관함 영상도 삭제하므로 주의하세요.")
-                    .setPositiveButton("확인",null).show()
+                    .setPositiveButton("확인",null))
             }
         })
         setupPinControls()
@@ -135,6 +153,7 @@ class SettingsFragment : Fragment() {
         }
         parent.addView(pinConfirmation,parent.indexOfChild(binding.btnSavePin))
         binding.btnSavePin.setOnClickListener {
+            if (!authenticated()) return@setOnClickListener
             val pin = binding.inputPinCode.text?.toString().orEmpty()
             val enabled = binding.switchPinLock.isChecked
 
@@ -195,16 +214,17 @@ class SettingsFragment : Fragment() {
     }
 
     private fun requestMissingPermissions() {
+        if (!authenticated()) return
         val ctx = requireContext()
         val missing = PermissionHelper.REQUIRED_PERMISSIONS.filter { ContextCompat.checkSelfPermission(ctx, it) != PackageManager.PERMISSION_GRANTED }
         val prefs = ctx.getSharedPreferences("permission_requests", Context.MODE_PRIVATE)
         val fixed = missing.any { prefs.getBoolean(it, false) && !shouldShowRequestPermissionRationale(it) }
         if (fixed) {
-            MaterialAlertDialogBuilder(ctx).setTitle("앱 권한에서 허용해 주세요")
+            showDialog(MaterialAlertDialogBuilder(ctx).setTitle("앱 권한에서 허용해 주세요")
                 .setMessage("반복 거절한 권한은 시스템 설정에서 변경해야 합니다. 권한 → 카메라 또는 마이크에서 허용을 선택하세요. 마이크 없이 촬영하려면 일반/빠른 촬영 설정에서 마이크 녹음을 끌 수 있습니다.")
                 .setPositiveButton("앱 권한 설정") { _, _ ->
-                    startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, android.net.Uri.parse("package:" + ctx.packageName)))
-                }.setNegativeButton("취소", null).show()
+                    if (authenticated()) startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, android.net.Uri.parse("package:" + ctx.packageName)))
+                }.setNegativeButton("취소", null))
         } else if (missing.isNotEmpty()) {
             prefs.edit().apply { missing.forEach { putBoolean(it, true) } }.apply()
             permissionLauncher.launch(missing.toTypedArray())
@@ -247,10 +267,11 @@ class SettingsFragment : Fragment() {
     }
 
     private fun showBatteryGuideAndGo() {
-        MaterialAlertDialogBuilder(requireContext())
+        showDialog(MaterialAlertDialogBuilder(requireContext())
             .setTitle("🔋 배터리 최적화 예외 가이드")
             .setMessage("배터리 최적화 예외는 백그라운드 녹화에 도움이 됩니다. 과열·권한·저장공간 등의 중단까지 방지하지는 않습니다.\n\n[이동 후 가이드]\n1. 목록 상단의 필터를 '최적화하지 않은 앱'에서 '전체'로 변경합니다.\n2. '계산기' 앱을 검색해 찾습니다.\n3. 해당 앱을 선택하고 '최적화하지 않음' 또는 '제한 없음'으로 설정해 주세요.")
             .setPositiveButton("이동하기") { _, _ ->
+                if (!authenticated()) return@setPositiveButton
                 try {
                     val intent = Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
                     startActivity(intent)
@@ -259,11 +280,14 @@ class SettingsFragment : Fragment() {
                 }
             }
             .setNegativeButton("취소", null)
-            .show()
+        )
     }
 
+    override fun onStop() { onEntryLocked(); super.onStop() }
     override fun onDestroyView() {
+        onEntryLocked()
         super.onDestroyView()
         _binding = null
+        pinConfirmation = null
     }
 }

@@ -49,8 +49,14 @@ class MainActivity : AppCompatActivity() {
         binding.container.visibility = if (locked) View.GONE else View.VISIBLE
         binding.container.importantForAccessibility = if (locked) View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS else View.IMPORTANT_FOR_ACCESSIBILITY_AUTO
         binding.entryGate.visibility = if (locked) View.VISIBLE else View.GONE
+        if (locked) {
+            // Re-prioritize after Fragment lifecycle callbacks resume as well.
+            lockedBack.remove()
+            onBackPressedDispatcher.addCallback(this, lockedBack)
+        }
         lockedBack.isEnabled = locked
     }
+    fun isEntryAuthenticated(): Boolean = entry.authenticated
     fun unlockEntry() {
         entry.authenticated = true
         entry.resetEntry = false
@@ -69,9 +75,9 @@ class MainActivity : AppCompatActivity() {
     }
     override fun onUserLeaveHint() { lockEntry(); super.onUserLeaveHint() }
     private fun lockEntry() {
-        (supportFragmentManager.findFragmentById(R.id.container) as? EntryLockListener)?.onEntryLocked()
         entry.authenticated = false
         entry.resetEntry = true
         showProtection(true)
+        (supportFragmentManager.findFragmentById(R.id.container) as? EntryLockListener)?.onEntryLocked()
     }
 }
