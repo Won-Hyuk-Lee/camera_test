@@ -22,6 +22,8 @@ class CameraForegroundService : LifecycleService() {
     private var ready = false
     private var initializing = false
     private var pending: CameraSettings? = null
+    private var applyingPending = false
+    private var preparationToken = 0L
     private var source = "app"
     private var foreground = false
     private val handler = Handler(Looper.getMainLooper())
@@ -92,6 +94,8 @@ class CameraForegroundService : LifecycleService() {
             return
         }
         pending = settings
+        applyingPending = false
+        preparationToken++
         RecordingRuntime.state.value = RecordingState(RecordingPhase.PREPARING, message = "녹화 준비 중")
         try {
             ensureChannel()
@@ -109,17 +113,31 @@ class CameraForegroundService : LifecycleService() {
     }
     private fun startPending() {
         val config = pending ?: return
-        if (!ready) return
-        pending = null
-        handler.removeCallbacks(timeout)
+        if (!ready || applyingPending) return
+        applyingPending = true
+        val token = preparationToken
         try {
             CameraSettingsStore.applyToController(controller, config)
-            controller.startRecording(source)
+            controller.awaitControlsApplied { error ->
+                if (token != preparationToken || pending == null) return@awaitControlsApplied
+                if (error != null) { fail(error); return@awaitControlsApplied }
+                pending = null
+                applyingPending = false
+                handler.removeCallbacks(timeout)
+                try { controller.startRecording(source) }
+                catch (e: Exception) { fail("녹화를 시작할 수 없습니다: ${e.message}") }
+            }
         } catch (e: Exception) { fail("촬영 설정 적용 실패: ${e.message}") }
     }
-    fun stopBackgroundRecording(origin: String = "app") {
+    private fun cancelPreparation() {
+        preparationToken++
         pending = null
+        applyingPending = false
         handler.removeCallbacks(timeout)
+        controller.cancelPendingPreparation()
+    }
+    fun stopBackgroundRecording(origin: String = "app") {
+        cancelPreparation()
         if (controller.isRecording()) controller.stopRecording(origin)
         else {
             RecordingRuntime.state.value = RecordingState(message = "중지됨")
@@ -132,8 +150,7 @@ class CameraForegroundService : LifecycleService() {
         foreground = false
     }
     private fun fail(message: String) {
-        pending = null
-        handler.removeCallbacks(timeout)
+        cancelPreparation()
         val journal = RecordingJournal.begin(this, source, "start_rejected")
         RecordingJournal.finish(this, journal, message, "start_rejected")
         RecordingRuntime.state.value = RecordingState(RecordingPhase.ERROR, message = message)
@@ -147,7 +164,7 @@ class CameraForegroundService : LifecycleService() {
         if (!controller.isRecording() && pending == null) stopSelf()
     }
     override fun onDestroy() {
-        pending = null
+        cancelPreparation()
         handler.removeCallbacksAndMessages(null)
         RecordingRuntime.state.removeObserver(observer)
         controller.onFinalizeEnded = null

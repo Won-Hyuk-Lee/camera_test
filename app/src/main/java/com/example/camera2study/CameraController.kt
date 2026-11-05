@@ -74,7 +74,35 @@ class CameraController(private val context: Context) {
     private var optionsRequest = 0L
     private var zoomReady = false
     private var exposureReady = false
-    fun areControlsReady(): Boolean = zoomReady && exposureReady
+    private var optionsReady = false
+    private var preparationError: String? = null
+    private var preparationCallback: ((String?) -> Unit)? = null
+    fun areControlsReady(): Boolean = !released && camera != null && zoomReady && exposureReady && optionsReady && preparationError == null
+
+    /** Waits for the current camera generation, including any rebind before it becomes ready. */
+    fun awaitControlsApplied(callback: (String?) -> Unit) {
+        preparationCallback = callback
+        when {
+            released -> completePreparation("카메라가 닫혔습니다")
+            preparationError != null -> completePreparation(preparationError)
+            areControlsReady() -> completePreparation(null)
+        }
+    }
+
+    fun cancelPendingPreparation() { preparationCallback = null }
+
+    private fun completePreparation(error: String?) {
+        val callback = preparationCallback ?: return
+        preparationCallback = null
+        callback(error)
+    }
+
+    private fun failPreparation(message: String) {
+        preparationError = message
+        reportError(message)
+        completePreparation(message)
+    }
+
     private fun notifyControlsApplied() {
         if (!areControlsReady()) return
         // Persist acknowledged live adjustments even if the recording screen is closed next.
@@ -84,6 +112,7 @@ class CameraController(private val context: Context) {
             store.save(context, store.load(context).copy(
                 zoomRatio = zoomRatio, zoomModeRatio = selectedZoomModeRatio, exposureEv = exposureEv))
         }
+        completePreparation(null)
         onControlsApplied?.invoke()
     }
     var lastError: String? = null
@@ -260,6 +289,8 @@ class CameraController(private val context: Context) {
         cameraGeneration++
         zoomReady = false
         exposureReady = false
+        optionsReady = false
+        preparationError = null
         provider.unbindAll()
         lookProcessor?.close(); lookProcessor = null
         camera = null
@@ -317,7 +348,7 @@ class CameraController(private val context: Context) {
             val activeId = camera?.let { Camera2CameraInfo.from(it.cameraInfo).cameraId }
             onCameraChanged?.invoke(activeId)
         } catch (e: Exception) {
-            reportError("촬영 설정 적용 실패: ${e.message}")
+            failPreparation("촬영 설정 적용 실패: ${e.message}")
         }
     }
 
@@ -338,6 +369,7 @@ class CameraController(private val context: Context) {
         val cam = camera ?: return
         val generation = cameraGeneration
         val request = ++optionsRequest
+        optionsReady = false
         val control = Camera2CameraControl.from(cam.cameraControl)
         val builder = CaptureRequestOptions.Builder()
         // CameraX owns output rotation. Disable the framework's additional crop/rotation.
@@ -412,8 +444,11 @@ class CameraController(private val context: Context) {
 
         val future = control.setCaptureRequestOptions(builder.build())
         future.addListener({
-            if (cam === camera && generation == cameraGeneration && request == optionsRequest && !released)
-                runCatching { future.get() }.onFailure { reportError("수동 설정 적용 실패: ${it.message}") }
+            if (cam !== camera || generation != cameraGeneration || request != optionsRequest || released) return@addListener
+            runCatching { future.get() }.onSuccess {
+                optionsReady = true
+                notifyControlsApplied()
+            }.onFailure { failPreparation("카메라 설정 적용 실패: ${it.message}") }
         }, ContextCompat.getMainExecutor(context))
     }
 
@@ -456,7 +491,7 @@ class CameraController(private val context: Context) {
                 if (allowRebind && !isRecording()) {
                     pendingZoomAfterBind = applied
                     bindUseCases()
-                } else reportError("배율 적용 실패: ${it.message}")
+                } else failPreparation("배율 적용 실패: ${it.message}")
             }
         }, ContextCompat.getMainExecutor(context))
     }
@@ -589,9 +624,9 @@ class CameraController(private val context: Context) {
         val generation = cameraGeneration
         val request = ++exposureRequest
         exposureReady = false
-        if (exposureTimeNs != null) { reportError("수동 셔터 사용 중에는 노출 보정을 사용할 수 없습니다"); return }
+        if (exposureTimeNs != null) { exposureReady = true; reportError("수동 셔터 사용 중에는 노출 보정을 사용할 수 없습니다"); return }
         val state = cam.cameraInfo.exposureState
-        if (!state.isExposureCompensationSupported) return
+        if (!state.isExposureCompensationSupported) { exposureReady = true; notifyControlsApplied(); return }
         val clamped = index.coerceIn(getMinExposureIndex(), getMaxExposureIndex())
         val future = cam.cameraControl.setExposureCompensationIndex(clamped)
         future.addListener({
@@ -600,7 +635,7 @@ class CameraController(private val context: Context) {
                 exposureEv = it * state.exposureCompensationStep.toFloat()
                 exposureReady = true
                 notifyControlsApplied()
-            }.onFailure { reportError("밝기 적용 실패: ${it.message}") }
+            }.onFailure { failPreparation("밝기 적용 실패: ${it.message}") }
         }, ContextCompat.getMainExecutor(context))
     }
 
@@ -667,6 +702,7 @@ class CameraController(private val context: Context) {
     @SuppressLint("MissingPermission", "InvalidWakeLockTag")
     fun startRecording(source: String = "app") {
         if (released || isRecording()) return
+        check(areControlsReady()) { preparationError ?: "촬영 설정 적용이 완료되지 않았습니다" }
         session = com.example.camera2study.util.RecordingJournal.begin(context, source,
             "camera=${activeCameraId()}, zoom=$zoomRatio, quality=$videoQuality, fps=$targetFps, hdr=$isHdrEnabled, ev=$exposureEv, audio=$audioEnabled, orientation=$orientationMode, mirror=$mirrorFront")
         session?.let { journal ->
@@ -872,6 +908,7 @@ class CameraController(private val context: Context) {
     fun release() {
         if (isRecording()) stopRecording("service_destroyed")
         released = true
+        cancelPendingPreparation()
         orientationListener.disable()
         mainHandler.removeCallbacks(restartRunnable)
         mainHandler.removeCallbacks(autoStopRunnable)
