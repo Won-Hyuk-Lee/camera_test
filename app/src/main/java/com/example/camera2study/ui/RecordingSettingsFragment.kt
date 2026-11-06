@@ -151,7 +151,7 @@ class RecordingSettingsFragment : Fragment(), EntryLockListener {
                 .setNegativeButton("취소", null))
         }
         label(if (quick) "빠른 녹화 전용 설정" else "동영상 촬영 설정")
-        label("저장한 설정은 다음 촬영부터 적용됩니다. 초점은 연속 자동초점을 사용합니다.")
+        label("저장한 설정은 다음 촬영부터 적용됩니다. 초점과 화이트밸런스는 자동으로 조절합니다.")
         if (quick) button("현재 촬영 설정 가져오기") {
             draft = CameraSettingsStore.load(requireContext()); render()
         }
@@ -294,22 +294,13 @@ class RecordingSettingsFragment : Fragment(), EntryLockListener {
         val chars = Camera2CameraInfo.from(info)
         val capabilities = chars.getCameraCharacteristic(android.hardware.camera2.CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES) ?: intArrayOf()
         val sensor = capabilities.contains(android.hardware.camera2.CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_MANUAL_SENSOR)
-        val post = capabilities.contains(android.hardware.camera2.CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_MANUAL_POST_PROCESSING)
-        toggle("수동 화이트밸런스·셔터", draft.proMode) {
+        toggle("수동 노출 · 셔터와 감도", draft.proMode) {
             draft = if (it) draft.copy(proMode = true) else draft.copy(proMode = false,
                 awbMode = android.hardware.camera2.CameraMetadata.CONTROL_AWB_MODE_AUTO, exposureTimeNs = null, aperture = null)
             render()
         }
         if (!draft.proMode) return
-        val awbModes = chars.getCameraCharacteristic(android.hardware.camera2.CameraCharacteristics.CONTROL_AWB_AVAILABLE_MODES) ?: intArrayOf()
-        val awbOptions = listOf("자동" to 1, "백열등" to 2, "형광등" to 3, "태양광" to 5, "흐림" to 6,
-            "색온도 직접 설정" to 0).filter { it.second in awbModes && (it.second != 0 || post) }.ifEmpty { listOf("자동" to 1) }
-        if (draft.awbMode !in awbOptions.map { it.second }) draft = draft.copy(awbMode = 1)
-        choice("화이트밸런스", awbOptions, draft.awbMode) { draft = draft.copy(awbMode = it); render() }
-        if (draft.awbMode == 0) {
-            label("색온도는 센서별 보정 차이가 있는 근사값입니다. 시험 영상으로 색을 확인하세요.")
-            choice("색온도", (3000..8000 step 500).map { "$it K" to it }, draft.colorTempK) { draft = draft.copy(colorTempK = it) }
-        }
+        label("초점과 화이트밸런스는 수동 노출에서도 자동입니다.")
         val range = chars.getCameraCharacteristic(android.hardware.camera2.CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE)
         if (sensor && range != null) {
             val shutter = listOf("자동" to null) + listOf(30, 60, 120, 250, 500, 1000).map { "1/$it 초" to (1_000_000_000L / it) }

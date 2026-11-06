@@ -78,7 +78,7 @@ object CameraSettingsStore {
             fps = pref.getInt(KEY_FPS, 30),
             hdrEnabled = pref.getBoolean(KEY_HDR, false),
             proMode = pref.getBoolean(KEY_PRO_MODE, false),
-            awbMode = pref.getInt(KEY_AWB_MODE, CameraMetadata.CONTROL_AWB_MODE_AUTO),
+            awbMode = CameraMetadata.CONTROL_AWB_MODE_AUTO,
             colorTempK = pref.getInt(KEY_COLOR_TEMP_K, DEFAULT_COLOR_TEMP_K),
             exposureTimeNs = exposureTime.takeIf { it != NO_EXPOSURE_TIME },
             aperture = aperture.takeIf { it != NO_APERTURE }
@@ -120,7 +120,7 @@ object CameraSettingsStore {
             .putInt(KEY_FPS, settings.fps)
             .putBoolean(KEY_HDR, settings.hdrEnabled)
             .putBoolean(KEY_PRO_MODE, settings.proMode)
-            .putInt(KEY_AWB_MODE, settings.awbMode)
+            .putInt(KEY_AWB_MODE, CameraMetadata.CONTROL_AWB_MODE_AUTO)
             .putInt(KEY_COLOR_TEMP_K, settings.colorTempK)
             .putLong(KEY_EXPOSURE_TIME_NS, settings.exposureTimeNs ?: NO_EXPOSURE_TIME)
             .putFloat(KEY_APERTURE, settings.aperture ?: NO_APERTURE)
@@ -160,7 +160,7 @@ object CameraSettingsStore {
         "ratio" to s.ratioMode, "ev" to s.exposureEv, "audio" to s.audioEnabled, "private" to s.privateSave,
         "orientation" to s.orientation, "mirror" to s.mirrorFront, "quality" to qualityToName(s.quality),
         "segment" to s.maxDurationMs, "count" to s.maxRepeatCount, "total" to s.totalDurationMs,
-        "fps" to s.fps, "hdr" to s.hdrEnabled, "pro" to s.proMode, "awb" to s.awbMode,
+        "fps" to s.fps, "hdr" to s.hdrEnabled, "pro" to s.proMode, "awb" to CameraMetadata.CONTROL_AWB_MODE_AUTO,
         "kelvin" to s.colorTempK, "exposure" to (s.exposureTimeNs ?: NO_EXPOSURE_TIME), "aperture" to (s.aperture ?: NO_APERTURE))
 
     fun fromBundle(b: android.os.Bundle) = CameraSettings(
@@ -171,7 +171,7 @@ object CameraSettingsStore {
         audioEnabled = b.getBoolean("audio"), privateSave = b.getBoolean("private"), orientation = b.getString("orientation") ?: "AUTO",
         mirrorFront = b.getBoolean("mirror"), quality = qualityFromName(b.getString("quality")),
         maxDurationMs = b.getLong("segment"), maxRepeatCount = b.getInt("count"), totalDurationMs = b.getLong("total"),
-        fps = b.getInt("fps"), hdrEnabled = b.getBoolean("hdr"), proMode = b.getBoolean("pro"), awbMode = b.getInt("awb"),
+        fps = b.getInt("fps"), hdrEnabled = b.getBoolean("hdr"), proMode = b.getBoolean("pro"), awbMode = CameraMetadata.CONTROL_AWB_MODE_AUTO,
         colorTempK = b.getInt("kelvin"), exposureTimeNs = b.getLong("exposure").takeIf { it != NO_EXPOSURE_TIME },
         aperture = b.getFloat("aperture").takeIf { it != NO_APERTURE })
 
@@ -197,7 +197,7 @@ object CameraSettingsStore {
             fps = controller.targetFps,
             hdrEnabled = controller.isHdrEnabled,
             proMode = controller.isProMode,
-            awbMode = controller.getAwbMode(),
+            awbMode = CameraMetadata.CONTROL_AWB_MODE_AUTO,
             colorTempK = colorTempK.coerceIn(3000, 8000),
             exposureTimeNs = controller.getExposureTime(),
             aperture = controller.getAperture()
@@ -219,14 +219,8 @@ object CameraSettingsStore {
         controller.targetFps = settings.fps
         controller.isHdrEnabled = settings.hdrEnabled
         controller.isProMode = settings.proMode
-        controller.setAwbMode(if (settings.proMode) settings.awbMode else CameraMetadata.CONTROL_AWB_MODE_AUTO)
-        controller.setManualWbGains(
-            if (settings.proMode && settings.awbMode == CameraMetadata.CONTROL_AWB_MODE_OFF) {
-                kelvinToGains(settings.colorTempK)
-            } else {
-                null
-            }
-        )
+        controller.setAwbMode(CameraMetadata.CONTROL_AWB_MODE_AUTO)
+        controller.setManualWbGains(null)
         controller.setExposureTime(settings.exposureTimeNs.takeIf { settings.proMode })
         controller.setAperture(settings.aperture.takeIf { settings.proMode })
 
