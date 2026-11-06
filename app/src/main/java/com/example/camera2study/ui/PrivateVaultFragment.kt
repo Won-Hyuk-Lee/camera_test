@@ -411,6 +411,8 @@ class PrivateVaultFragment : Fragment(), com.example.camera2study.EntryLockListe
     private inner class VaultAdapter : RecyclerView.Adapter<VaultAdapter.Holder>() {
         private val io = java.util.concurrent.Executors.newFixedThreadPool(2)
         private val main = android.os.Handler(android.os.Looper.getMainLooper())
+        private val pending = java.util.concurrent.ConcurrentHashMap<String, CancellationSignal>()
+        @Volatile private var closed = false
         private val cache = object : androidx.collection.LruCache<String,android.graphics.Bitmap>(8 * 1024 * 1024) {
             override fun sizeOf(key: String,value: android.graphics.Bitmap) = value.byteCount
         }
@@ -427,6 +429,7 @@ class PrivateVaultFragment : Fragment(), com.example.camera2study.EntryLockListe
         }
         override fun getItemCount() = rows.size
         override fun onBindViewHolder(h: Holder,p: Int) {
+            if (closed) return
             val r = rows[p]; val f = r.file
             h.path = f?.absolutePath.orEmpty(); h.select.setOnCheckedChangeListener(null)
             val selectable = r.files.filter { it.absolutePath !in RecordingJournal.activePaths }
@@ -455,18 +458,34 @@ class PrivateVaultFragment : Fragment(), com.example.camera2study.EntryLockListe
                 val key = f.absolutePath + ":" + f.length()
                 val cached = cache.get(key)
                 if (cached != null) h.thumbnail.setImageBitmap(cached)
-                else if (mediaInfo[f.absolutePath]?.playable == true) io.execute {
-                    val bitmap = runCatching {
-                        if (f.extension == "jpg") BitmapFactory.decodeFile(f.absolutePath,BitmapFactory.Options().apply { inSampleSize = 8 })
-                        else if (android.os.Build.VERSION.SDK_INT >= 29) ThumbnailUtils.createVideoThumbnail(f,Size(128,128),CancellationSignal())
-                        else @Suppress("DEPRECATION") ThumbnailUtils.createVideoThumbnail(f.absolutePath,MediaStore.Images.Thumbnails.MINI_KIND)
-                    }.getOrNull()
-                    if (bitmap != null) cache.put(key,bitmap)
-                    main.post { if (h.path == f.absolutePath && bitmap != null) h.thumbnail.setImageBitmap(bitmap) }
+                else if (mediaInfo[f.absolutePath]?.playable == true) {
+                    val signal = CancellationSignal()
+                    if (pending.putIfAbsent(key, signal) == null) io.execute {
+                        try {
+                            if (closed) return@execute
+                            val bitmap = runCatching {
+                                if (f.extension == "jpg") BitmapFactory.decodeFile(f.absolutePath,BitmapFactory.Options().apply { inSampleSize = 8 })
+                                else if (android.os.Build.VERSION.SDK_INT >= 29) ThumbnailUtils.createVideoThumbnail(f,Size(128,128),signal)
+                                else @Suppress("DEPRECATION") ThumbnailUtils.createVideoThumbnail(f.absolutePath,MediaStore.Images.Thumbnails.MINI_KIND)
+                            }.getOrNull()
+                            main.post {
+                                if (!closed && bitmap != null) {
+                                    cache.put(key, bitmap)
+                                    // The original holder may have been recycled while a duplicate request was merged.
+                                    val position = rows.indexOfFirst { it.file?.absolutePath == f.absolutePath }
+                                    if (position >= 0) notifyItemChanged(position)
+                                }
+                            }
+                        } finally { pending.remove(key, signal) }
+                    }
                 }
             }
         }
-        fun close() { io.shutdownNow(); main.removeCallbacksAndMessages(null); cache.evictAll() }
+        fun close() {
+            closed = true
+            pending.values.forEach { it.cancel() }; pending.clear()
+            io.shutdownNow(); main.removeCallbacksAndMessages(null); cache.evictAll()
+        }
     }
     override fun onDestroyView() { exportButtons.clear(); onEntryLocked(); if (::adapter.isInitialized) adapter.close(); _binding = null; super.onDestroyView() }
 }
