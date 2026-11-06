@@ -22,6 +22,7 @@ import com.example.camera2study.R
 import com.example.camera2study.util.VideoLook
 import com.example.camera2study.util.CameraSettingsStore
 import com.example.camera2study.util.CameraSettingsStore.CameraSettings
+import com.example.camera2study.util.VideoConfigurationSupport
 
 @androidx.annotation.OptIn(ExperimentalCamera2Interop::class)
 class RecordingSettingsFragment : Fragment(), EntryLockListener {
@@ -29,16 +30,22 @@ class RecordingSettingsFragment : Fragment(), EntryLockListener {
     private var baseline = CameraSettings()
     private var savedFacingBack = true
     private var statusLabel: TextView? = null
+    private var scopeLabel: TextView? = null
+    private var saveButton: Button? = null
+    private var testButton: Button? = null
+    private var settingsScroll: ScrollView? = null
     private var draft = CameraSettings()
         set(value) { field = value; updateSavedStatus() }
     private fun hasUnsavedChanges() = draft != baseline || draft.lensFacingBack != savedFacingBack
     private fun updateSavedStatus() {
         statusLabel?.text = if (hasUnsavedChanges()) "미저장 변경 · 저장 후 다음 촬영에 적용" else "저장된 설정"
+        scopeLabel?.text = (if (quick) "빠른 녹화 설정" else "일반 촬영 설정") + " · " + if (draft.lensFacingBack) "후면" else "전면"
     }
     private var list: LinearLayout? = null
     private var provider: ProcessCameraProvider? = null
     private var ready = false
     private var details = false
+    private var manualExpanded = false
     private val dialogs = mutableSetOf<android.app.Dialog>()
     private fun authenticated() = (activity as? MainActivity)?.isEntryAuthenticated() == true
     private fun showDialog(builder: com.google.android.material.dialog.MaterialAlertDialogBuilder) {
@@ -72,14 +79,39 @@ class RecordingSettingsFragment : Fragment(), EntryLockListener {
 
     override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, state: Bundle?): View {
         val ctx = requireContext()
+        val root = LinearLayout(ctx).apply {
+            orientation = LinearLayout.VERTICAL; fitsSystemWindows = true
+            setBackgroundColor(android.graphics.Color.rgb(18, 20, 25))
+            setPadding(dp(16), dp(8), dp(16), dp(8))
+        }
+        scopeLabel = TextView(ctx).apply { textSize = 20f; setTextColor(android.graphics.Color.WHITE); setPadding(0, dp(4), 0, dp(4)) }
+        root.addView(scopeLabel)
+        statusLabel = TextView(ctx).apply { textSize = 14f; setTextColor(android.graphics.Color.LTGRAY); setPadding(0, 0, 0, dp(8)) }
+        root.addView(statusLabel)
         val content = LinearLayout(ctx).apply {
             orientation = LinearLayout.VERTICAL
-            setBackgroundColor(android.graphics.Color.rgb(18, 20, 25))
-            val d = resources.displayMetrics.density
-            setPadding((16*d).toInt(),(16*d).toInt(),(16*d).toInt(),(24*d).toInt())
+            setPadding(0, 0, 0, dp(16))
         }
         list = content
-        return ScrollView(ctx).apply { isFillViewport = true; fitsSystemWindows = true; addView(content) }
+        settingsScroll = ScrollView(ctx).apply { isFillViewport = true; addView(content) }
+        root.addView(settingsScroll, LinearLayout.LayoutParams(-1, 0, 1f))
+        val footer = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL; setPadding(0, dp(8), 0, 0) }
+        fun action(text: String, click: () -> Unit) = Button(ctx).apply {
+            this.text = text; textSize = 14f; minimumHeight = dp(56)
+            setOnClickListener { if (authenticated()) click() }
+            footer.addView(this, LinearLayout.LayoutParams(0, -2, 1f))
+        }
+        action("뒤로") { leave() }
+        saveButton = action("설정 저장") { if (saveDraft()) toast("설정을 저장했습니다. 다음 촬영부터 적용됩니다") }
+        if (quick) testButton = action("10초 시험") {
+            if (saveDraft()) {
+                CameraForegroundService.requestQuickRecording(requireContext(), test = true)
+                toast("저장한 설정으로 10초 시험 촬영을 요청했습니다")
+            }
+        }
+        root.addView(footer)
+        updateSavedStatus()
+        return root
     }
 
     override fun onViewCreated(view: View, state: Bundle?) {
@@ -93,8 +125,14 @@ class RecordingSettingsFragment : Fragment(), EntryLockListener {
     }
 
     private fun label(text: String) = TextView(requireContext()).also {
-        it.text = text; it.setTextColor(android.graphics.Color.WHITE); it.textSize = 16f; it.setPadding(0, 20, 0, 8); list?.addView(it)
+        it.text = text; it.setTextColor(android.graphics.Color.WHITE); it.textSize = 14f; it.setPadding(0, dp(12), 0, dp(4)); list?.addView(it)
     }
+    private fun section(text: String) = label(text).apply {
+        textSize = 18f; setTypeface(typeface, android.graphics.Typeface.BOLD)
+        setTextColor(android.graphics.Color.rgb(167, 198, 255)); setPadding(0, dp(24), 0, dp(8))
+        androidx.core.view.ViewCompat.setAccessibilityHeading(this, true)
+    }
+    private fun dp(value: Int) = (value * resources.displayMetrics.density).toInt()
     private fun button(text: String, action: () -> Unit) = Button(requireContext()).also {
         it.text = text; it.setOnClickListener { if (authenticated()) action() }; list?.addView(it)
     }
@@ -138,20 +176,12 @@ class RecordingSettingsFragment : Fragment(), EntryLockListener {
 
     private fun render() {
         val container = list ?: return
-        val scroll = container.parent as? ScrollView
+        val scroll = settingsScroll
         val scrollY = scroll?.scrollY ?: 0
         container.removeAllViews()
-        button("뒤로") { leave() }
-        statusLabel = label("")
         updateSavedStatus()
-        button("이 프로필 기본값으로 초기화") {
-            showDialog(com.google.android.material.dialog.MaterialAlertDialogBuilder(requireContext()).setTitle("설정 초기화")
-                .setMessage("현재 전면/후면 프로필을 기본값으로 되돌립니다. 설정 저장을 눌러야 적용됩니다.")
-                .setPositiveButton("초기화") { _, _ -> if (authenticated()) { draft = CameraSettings(lensFacingBack = draft.lensFacingBack); render() } }
-                .setNegativeButton("취소", null))
-        }
-        label(if (quick) "빠른 녹화 전용 설정" else "동영상 촬영 설정")
-        label("저장한 설정은 다음 촬영부터 적용됩니다. 초점과 화이트밸런스는 자동으로 조절합니다.")
+        label(if (quick) "위젯과 빠른 녹화는 이 설정으로 시작합니다. 저장해야 다음 촬영에 적용됩니다." else "촬영 화면에서 시작할 때 사용할 설정입니다. 빠른 녹화 설정과 별도로 저장됩니다.")
+        section("프로필과 렌즈")
         if (quick) button("현재 촬영 설정 가져오기") {
             draft = CameraSettingsStore.load(requireContext()); render()
         }
@@ -165,7 +195,7 @@ class RecordingSettingsFragment : Fragment(), EntryLockListener {
             } else switchFacing(it)
         }
         val info = selectedInfo()
-        if (!ready || info == null) { label("카메라 정보를 확인 중입니다. 권한을 허용해 주세요."); return }
+        if (!ready || info == null) { label("카메라 정보를 확인 중입니다. 권한을 허용해 주세요."); refreshActions(); return }
         val facing = if (draft.lensFacingBack) CameraSelector.LENS_FACING_BACK else CameraSelector.LENS_FACING_FRONT
         val lensOptions = listOf("기본 카메라 · 자동 렌즈 전환" to null) + provider!!.availableCameraInfos.filter { it.lensFacing == facing }.map {
             val id = Camera2CameraInfo.from(it).cameraId
@@ -182,6 +212,8 @@ class RecordingSettingsFragment : Fragment(), EntryLockListener {
         choice("배율 · 선택한 렌즈 기준", zoomValues.map { "%.2f×".format(it) to it }, draft.zoomRatio.coerceIn(min, max)) {
             draft = draft.copy(zoomRatio = it, zoomModeRatio = it)
         }
+        section("화질과 밝기")
+        label("16:9 동영상 · 초점 자동 · 화이트밸런스 자동")
         val caps = Recorder.getVideoCapabilities(info)
         val hdrRange = caps.supportedDynamicRanges.firstOrNull { it != DynamicRange.SDR && it.bitDepth == DynamicRange.BIT_DEPTH_10_BIT }
         if (hdrRange == null && draft.hdrEnabled) draft = draft.copy(hdrEnabled = false)
@@ -191,27 +223,32 @@ class RecordingSettingsFragment : Fragment(), EntryLockListener {
             else draft = draft.copy(hdrEnabled = it)
             render()
         }
-        val qualities = caps.getSupportedQualities(if (draft.hdrEnabled) hdrRange!! else DynamicRange.SDR)
+        val qualities = caps.getSupportedQualities(VideoConfigurationSupport.dynamicRange(info, draft.hdrEnabled) ?: DynamicRange.SDR)
         if (draft.quality !in qualities && qualities.isNotEmpty()) {
             draft = draft.copy(quality = qualities.first())
             label("이 카메라에서 지원하는 화질로 선택을 조정했습니다. 저장 후 적용됩니다.")
         }
-        choice("영상 품질", qualities.map { qualityName(it) to it }, draft.quality) { draft = draft.copy(quality = it) }
-        val rates = listOf(30, 60).filter { fps -> info.supportedFrameRateRanges.any { it.contains(fps) } }.ifEmpty { listOf(30) }
-        if (draft.fps !in rates) draft = draft.copy(fps = rates.first())
-        choice("프레임 속도", rates.map { "$it FPS" to it }, draft.fps) { draft = draft.copy(fps = it); render() }
+        choice("영상 품질", qualities.map { qualityName(it) to it }, draft.quality) { draft = draft.copy(quality = it); render() }
+        val rates = VideoConfigurationSupport.supportedFps(info, draft.quality, draft.hdrEnabled, !draft.look.isIdentity())
+        if (rates.isEmpty()) label("현재 렌즈·화질·HDR·색보정 조합을 지원하지 않습니다. 다른 설정을 선택해 주세요.")
+        else {
+            if (draft.fps !in rates) { draft = draft.copy(fps = rates.first()); label("이 조합에서 지원하는 프레임 속도로 조정했습니다. 저장 후 적용됩니다.") }
+            choice("프레임 속도", rates.map { "$it FPS" to it }, draft.fps) { draft = draft.copy(fps = it); render() }
+        }
         val exposure = info.exposureState
         val step = exposure.exposureCompensationStep.toFloat()
         val evs = if (exposure.isExposureCompensationSupported && step > 0) (exposure.exposureCompensationRange.lower..exposure.exposureCompensationRange.upper).map { it * step } else listOf(0f)
         val selectedEv = evs.minByOrNull { kotlin.math.abs(it - draft.exposureEv) } ?: 0f
         draft = draft.copy(exposureEv = selectedEv)
         choice("밝기 · 노출 보정", evs.map { "%+.2f EV".format(it) to it }, selectedEv) { draft = draft.copy(exposureEv = it) }
+        section("영상 색보정")
+        lookControls()
+        section("소리와 저장")
         toggle("마이크 녹음", draft.audioEnabled) { draft = draft.copy(audioEnabled = it) }
         toggle("비공개 보관함에 저장", draft.privateSave) { draft = draft.copy(privateSave = it) }
         toggle("전면 저장 영상 좌우 반전", draft.mirrorFront) { draft = draft.copy(mirrorFront = it) }
         choice("저장 영상 방향", listOf("시작 시 기기 방향" to "AUTO", "가로" to "LANDSCAPE", "세로" to "PORTRAIT"), draft.orientation) { draft = draft.copy(orientation = it) }
-        lookControls()
-        manualControls(info)
+        section("파일 분할과 촬영 종료")
         choice("파일당 길이", listOf("10초 · 시험용" to 10_000L, "5분" to 300_000L, "10분" to 600_000L, "30분" to 1_800_000L), draft.maxDurationMs) { draft = draft.copy(maxDurationMs = it) }
         val ending = if (draft.totalDurationMs > 0) "TIME" else if (draft.maxRepeatCount > 0) "FILES" else "MANUAL"
         choice("전체 종료 조건", listOf("직접 중지" to "MANUAL", "총 파일 수" to "FILES", "총 녹화 시간" to "TIME"), ending) {
@@ -221,20 +258,33 @@ class RecordingSettingsFragment : Fragment(), EntryLockListener {
         if (ending == "FILES") choice("총 파일 수", listOf(1, 2, 4, 8).map { "$it 개" to it }, draft.maxRepeatCount) { draft = draft.copy(maxRepeatCount = it) }
         if (ending == "TIME") choice("총 녹화 시간", listOf("20초 · 시험용" to 20_000L, "30분" to 1_800_000L, "60분" to 3_600_000L, "120분" to 7_200_000L), draft.totalDurationMs) { draft = draft.copy(totalDurationMs = it) }
         if (ending == "TIME") label("분할 후 남은 시간이 1초 미만이면 짧은 파일을 추가하지 않고 종료합니다.")
-        button("설정 저장") {
-            if (saveDraft()) toast("설정을 저장했습니다. 다음 촬영부터 적용됩니다")
+        section("고급 노출과 초기화")
+        button(if (manualExpanded) "수동 노출 접기" else "수동 노출 펼치기") { manualExpanded = !manualExpanded; render() }
+        if (manualExpanded) manualControls(info)
+        button("이 프로필 기본값으로 초기화") {
+            showDialog(com.google.android.material.dialog.MaterialAlertDialogBuilder(requireContext()).setTitle("설정 초기화")
+                .setMessage("현재 편집 중인 전면/후면 프로필만 기본값으로 되돌립니다. 설정 저장을 눌러야 적용됩니다.")
+                .setPositiveButton("초기화") { _, _ -> if (authenticated()) { draft = CameraSettings(lensFacingBack = draft.lensFacingBack); render() } }
+                .setNegativeButton("취소", null))
         }
-        if (quick) button("저장 후 10초 시험 촬영") {
-            if (saveDraft()) {
-                CameraForegroundService.requestQuickRecording(requireContext(), test = true)
-                toast("10초 시험 촬영을 요청했습니다. 촬영 결과에서 확인하세요")
-            }
-        }
+        refreshActions()
         scroll?.post { if (list === container) scroll.scrollTo(0, scrollY) }
+    }
+
+    private fun configurationProblem(): String? {
+        val info = selectedInfo() ?: return "카메라 정보를 확인한 후 저장해 주세요"
+        if (!ready) return "카메라 정보를 확인한 후 저장해 주세요"
+        return VideoConfigurationSupport.problem(info, draft.quality, draft.fps, draft.hdrEnabled, !draft.look.isIdentity())
+    }
+    private fun refreshActions() {
+        val valid = ready && configurationProblem() == null
+        saveButton?.isEnabled = valid
+        testButton?.isEnabled = valid && com.example.camera2study.RecordingRuntime.state.value?.active != true
     }
 
     private fun saveDraft(): Boolean {
         if (!authenticated()) return false
+        configurationProblem()?.let { toast(it); return false }
         CameraSettingsStore.save(requireContext(), draft, quick)
         baseline = draft
         savedFacingBack = draft.lensFacingBack
@@ -328,6 +378,10 @@ class RecordingSettingsFragment : Fragment(), EntryLockListener {
     private fun toast(text: String) { context?.let { Toast.makeText(it, text, Toast.LENGTH_LONG).show() } }
     private fun qualityName(quality: Quality): String = when (quality) { Quality.UHD -> "UHD · 4K"; Quality.FHD -> "FHD · 1080p"; Quality.HD -> "HD · 720p"; else -> "SD" }
     override fun onStop() { onEntryLocked(); super.onStop() }
-    override fun onDestroyView() { onEntryLocked(); list = null; statusLabel = null; super.onDestroyView() }
+    override fun onDestroyView() {
+        onEntryLocked(); list = null; statusLabel = null; scopeLabel = null
+        saveButton = null; testButton = null; settingsScroll = null
+        super.onDestroyView()
+    }
     companion object { fun create(quick: Boolean) = RecordingSettingsFragment().apply { arguments = Bundle().apply { putBoolean("quick", quick) } } }
 }
