@@ -3,6 +3,7 @@ package com.example.camera2study.ui
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
@@ -56,6 +57,8 @@ class RecordingSettingsFragment : Fragment(), EntryLockListener {
     private var compareOriginal: CheckBox? = null
     private var originalPreview = false
     private var previewSession: SettingsPreviewSession? = null
+    private var sawActiveRecording = false
+    private var previewHandoffDeadlineMs = 0L
     private val previewHandler = Handler(Looper.getMainLooper())
     private val previewUpdate = Runnable { updatePreview() }
     private val dialogs = mutableSetOf<android.app.Dialog>()
@@ -69,6 +72,7 @@ class RecordingSettingsFragment : Fragment(), EntryLockListener {
     }
     override fun onEntryLocked() {
         dialogs.toList().forEach { it.dismiss() }
+        previewHandoffDeadlineMs = 0L
         stopPreview()
     }
     override fun onEntryUnlocked() { schedulePreview() }
@@ -165,9 +169,17 @@ class RecordingSettingsFragment : Fragment(), EntryLockListener {
         render()
         RecordingRuntime.state.observe(viewLifecycleOwner) { stateValue ->
             if (stateValue.active) {
+                sawActiveRecording = true
+                previewHandoffDeadlineMs = 0L
                 stopPreview()
                 previewStatus?.text = "녹화 중에는 미리보기를 중단합니다. 저장한 설정은 다음 촬영부터 적용됩니다."
-            } else schedulePreview()
+            } else {
+                if (sawActiveRecording) {
+                    sawActiveRecording = false
+                    previewHandoffDeadlineMs = if (authenticated() && isResumed) SystemClock.uptimeMillis() + 2_000L else 0L
+                }
+                schedulePreview()
+            }
             refreshActions()
         }
         val future = ProcessCameraProvider.getInstance(requireContext())
@@ -454,7 +466,8 @@ class RecordingSettingsFragment : Fragment(), EntryLockListener {
             previewStatus?.text = problem
             return
         }
-        val session = previewSession ?: SettingsPreviewSession(requireContext(), viewLifecycleOwner, preview) { message ->
+        val session = previewSession ?: SettingsPreviewSession(requireContext(), viewLifecycleOwner, preview,
+            previewHandoffDeadlineMs, { authenticated() && isResumed && preview.isShown }) { message ->
             previewStatus?.text = message + if (originalPreview) " · 원본 보기" else ""
         }.also { previewSession = it }
         session.show(draft, originalPreview)
@@ -466,7 +479,7 @@ class RecordingSettingsFragment : Fragment(), EntryLockListener {
         previewSession = null
     }
     override fun onResume() { super.onResume(); schedulePreview() }
-    override fun onPause() { stopPreview(); super.onPause() }
+    override fun onPause() { previewHandoffDeadlineMs = 0L; stopPreview(); super.onPause() }
     override fun onStop() { onEntryLocked(); super.onStop() }
     override fun onDestroyView() {
         onEntryLocked(); list = null; statusLabel = null; scopeLabel = null
