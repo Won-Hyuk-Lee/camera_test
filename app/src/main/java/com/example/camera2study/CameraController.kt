@@ -128,6 +128,16 @@ class CameraController(private val context: Context) {
 
     private var cameraProvider: ProcessCameraProvider? = null
     private var camera: Camera? = null
+    private var observedCameraInfo: androidx.camera.core.CameraInfo? = null
+    private var lastCameraState: String? = null
+    private val cameraStateObserver = androidx.lifecycle.Observer<androidx.camera.core.CameraState> { state ->
+        val signature = "${state.type}:${state.error?.code}"
+        if (signature != lastCameraState) {
+            lastCameraState = signature
+            recordDiagnostic("camera_state", org.json.JSONObject().put("state", state.type.name)
+                .put("errorCode", state.error?.code).put("error", state.error?.cause?.message.orEmpty().take(500)))
+        }
+    }
     private var wakeLock: PowerManager.WakeLock? = null
     private var previewUseCase: Preview? = null
     private var videoCapture: VideoCapture<Recorder>? = null
@@ -279,21 +289,26 @@ class CameraController(private val context: Context) {
         if (released || previewView === view) return
         previewView = view
         previewUseCase?.setSurfaceProvider(view.surfaceProvider)
+        recordDiagnostic("preview_attached")
     }
     fun detachPreview() {
         if (previewView == null) return
         previewView = null
         // Keep the use-case group and video crop stable while the screen is closed.
         previewUseCase?.setSurfaceProvider(null)
+        recordDiagnostic("preview_detached")
     }
 
     fun reportError(message: String) {
         lastError = message
         android.util.Log.w("CameraController", message)
+        recordDiagnostic("controller_error", org.json.JSONObject().put("message", message.take(500)))
         onError?.invoke(message)
     }
 
     private fun unbindOwnedUseCases() {
+        observedCameraInfo?.cameraState?.removeObserver(cameraStateObserver)
+        observedCameraInfo = null
         val owned = listOfNotNull(previewUseCase, videoCapture)
         if (owned.isNotEmpty()) cameraProvider?.unbind(*owned.toTypedArray())
     }
@@ -351,6 +366,9 @@ class CameraController(private val context: Context) {
                 }.also { it.look = videoLook.normalized(); group.addEffect(it.effect) }
             }
             camera = provider.bindToLifecycle(owner, selector, group.build())
+            lastCameraState = null
+            observedCameraInfo = camera?.cameraInfo
+            observedCameraInfo?.cameraState?.observe(owner, cameraStateObserver)
             previewUseCase = preview
             videoCapture = video
             lastError = null
@@ -688,6 +706,7 @@ class CameraController(private val context: Context) {
 
     private var session: org.json.JSONObject? = null
     private var sessionFinished = true
+    private var audioHealth = com.example.camera2study.util.AudioHealthTimeline(false)
     private var segmentEntry: org.json.JSONObject? = null
     private var sessionDurationMs = 0L
     private var sessionBytes = 0L
@@ -704,6 +723,32 @@ class CameraController(private val context: Context) {
     private var sessionPlan = RecordingPlan(LONG_RECORDING_SEGMENT_MS)
     private val restartRunnable = Runnable { if (!stopRequested && !released) startSegment() }
     val recordingState: RecordingState get() = RecordingRuntime.state.value ?: RecordingState()
+
+    private fun recordDiagnostic(type: String, details: org.json.JSONObject = org.json.JSONObject()) {
+        val journal = session ?: return
+        if (sessionFinished) return
+        details.put("phase", recordingState.phase.name)
+        com.example.camera2study.util.RecordingJournal.diagnostic(context, journal, type, currentRepeatCount + 1, details)
+    }
+
+    private fun updateAudioHealth(event: VideoRecordEvent) {
+        val stats = event.recordingStats.audioStats
+        val state = when (stats.audioState) {
+            androidx.camera.video.AudioStats.AUDIO_STATE_ACTIVE -> "ACTIVE"
+            androidx.camera.video.AudioStats.AUDIO_STATE_DISABLED -> "DISABLED"
+            androidx.camera.video.AudioStats.AUDIO_STATE_SOURCE_SILENCED -> "SOURCE_SILENCED"
+            androidx.camera.video.AudioStats.AUDIO_STATE_SOURCE_ERROR -> "SOURCE_ERROR"
+            androidx.camera.video.AudioStats.AUDIO_STATE_ENCODER_ERROR -> "ENCODER_ERROR"
+            androidx.camera.video.AudioStats.AUDIO_STATE_MUTED -> "MUTED"
+            else -> "UNKNOWN_${stats.audioState}"
+        }
+        val affected = state in setOf("SOURCE_SILENCED", "SOURCE_ERROR", "ENCODER_ERROR", "MUTED")
+        val at = sessionDurationMs + segmentDurationMs
+        val changed = audioHealth.observe(state, affected, at, stats.errorCause?.message?.take(500))
+        session?.let { com.example.camera2study.util.RecordingJournal.audioSummary(it, audioHealth.snapshot(at)) }
+        if (changed) recordDiagnostic("audio_state", org.json.JSONObject().put("state", state)
+            .put("recordedMs", at).put("error", stats.errorCause?.message.orEmpty().take(500)))
+    }
 
     private fun publish(phase: RecordingPhase, message: String) {
         if (recordingState.phase != phase) phaseSince = android.os.SystemClock.elapsedRealtime()
@@ -726,12 +771,15 @@ class CameraController(private val context: Context) {
             when (recordingState.phase) {
                 RecordingPhase.PREPARING, RecordingPhase.RECORDING -> {
                     if (now - lastProgressAt > 15_000L) {
+                        recordDiagnostic("recording_progress_timeout", org.json.JSONObject().put("stalledMs", now - lastProgressAt)
+                            .put("durationMs", segmentDurationMs).put("encodedBytes", segmentBytes))
                         failure = "영상 데이터 기록이 15초 동안 진행되지 않았습니다"
                         reportError(failure!!)
                         stopRecording("progress_timeout")
                     }
                 }
                 RecordingPhase.FINALIZING -> if (now - phaseSince > 15_000L) {
+                    recordDiagnostic("finalize_timeout")
                     failure = failure ?: "파일 저장 완료를 확인하지 못했습니다"
                     stopReason = "finalize_timeout"
                     recording?.close()
@@ -768,6 +816,12 @@ class CameraController(private val context: Context) {
         currentRepeatCount = 0
         sessionDurationMs = 0
         sessionBytes = 0
+        audioHealth = com.example.camera2study.util.AudioHealthTimeline(audioEnabled)
+        session?.let { com.example.camera2study.util.RecordingJournal.audioSummary(it, audioHealth.snapshot(0)) }
+        recordDiagnostic("configuration_ready", org.json.JSONObject().put("cameraId", activeCameraId())
+            .put("zoom", zoomRatio).put("exposureEv", exposureEv).put("fps", targetFps)
+            .put("previewAttached", previewView != null).put("cameraState", lastCameraState.orEmpty())
+            .put("effect", usesVideoEffect()))
         sessionPlan = RecordingPlan(maxDurationMs.coerceAtLeast(1_000L), maxRepeatCount.coerceAtLeast(0), totalDurationMs.coerceAtLeast(0))
         val problem = com.example.camera2study.util.CaptureHealth.problem(context, audioEnabled, true)
         if (problem != null || (!isPrivateSave && android.os.Build.VERSION.SDK_INT < 29)) {
@@ -833,8 +887,10 @@ class CameraController(private val context: Context) {
                 val previousBytes = segmentBytes
                 segmentBytes = event.recordingStats.numBytesRecorded
                 if (segmentBytes > previousBytes && segmentDurationMs > previousDuration) lastProgressAt = android.os.SystemClock.elapsedRealtime()
+                updateAudioHealth(event)
                 when (event) {
                     is VideoRecordEvent.Start -> {
+                        recordDiagnostic("recording_started")
                         recordingStartElapsedMs = android.os.SystemClock.elapsedRealtime()
                         publish(RecordingPhase.PREPARING, "영상 데이터 확인 중")
                         mainHandler.postDelayed(autoStopRunnable, sessionSegmentMs)
@@ -852,12 +908,14 @@ class CameraController(private val context: Context) {
                         }
                     }
                     is VideoRecordEvent.Pause -> {
+                        recordDiagnostic("recording_paused")
                         isRecordingPaused = true
                         pauseStartElapsedMs = android.os.SystemClock.elapsedRealtime()
                         mainHandler.removeCallbacks(autoStopRunnable)
                         publish(RecordingPhase.PAUSED, "일시정지")
                     }
                     is VideoRecordEvent.Resume -> {
+                        recordDiagnostic("recording_resumed")
                         isRecordingPaused = false
                         totalPausedMs += android.os.SystemClock.elapsedRealtime() - pauseStartElapsedMs
                         lastProgressAt = android.os.SystemClock.elapsedRealtime()
@@ -866,6 +924,9 @@ class CameraController(private val context: Context) {
                         publish(RecordingPhase.RECORDING, "녹화 중")
                     }
                     is VideoRecordEvent.Finalize -> {
+                        recordDiagnostic("segment_finalized", org.json.JSONObject().put("errorCode", event.error)
+                            .put("error", event.cause?.message.orEmpty().take(500))
+                            .put("durationMs", segmentDurationMs).put("encodedBytes", segmentBytes))
                         mainHandler.removeCallbacks(autoStopRunnable)
                         recording = null
                         isRecordingPaused = false
@@ -911,14 +972,18 @@ class CameraController(private val context: Context) {
         mainHandler.removeCallbacks(healthCheck)
         stopRequested = true
         releaseWakeLock()
+        audioHealth.finish(sessionDurationMs + segmentDurationMs)
+        val audioSummary = audioHealth.snapshot(sessionDurationMs + segmentDurationMs)
         session?.let { journal ->
+            com.example.camera2study.util.RecordingJournal.audioSummary(journal, audioSummary)
             segmentEntry?.takeIf { it.optString("status") == "RECORDING" }?.let {
                 com.example.camera2study.util.RecordingJournal.finishSegment(context, journal, it,
                     segmentDurationMs, segmentBytes, failure ?: "저장 완료 확인 필요", "")
             }
             com.example.camera2study.util.RecordingJournal.finish(context, journal, failure, stopReason)
         }
-        publish(if (failure == null) RecordingPhase.COMPLETED else RecordingPhase.ERROR, failure ?: "저장 완료")
+        publish(if (failure == null) RecordingPhase.COMPLETED else RecordingPhase.ERROR,
+            failure ?: if (audioSummary.hadIssues) "저장 완료 · 소리 확인 필요" else "저장 완료")
         onFinalizeEnded?.invoke()
     }
 
@@ -940,6 +1005,7 @@ class CameraController(private val context: Context) {
 
     fun stopRecording(reason: String = "user") {
         if (!isRecording()) return
+        recordDiagnostic("stop_requested", org.json.JSONObject().put("reason", reason))
         stopReason = reason
         stopRequested = true
         mainHandler.removeCallbacks(restartRunnable)

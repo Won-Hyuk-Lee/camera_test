@@ -41,13 +41,38 @@ object RecordingJournal {
     fun begin(context: Context, source: String, settings: String): JSONObject {
         recover(context)
         return JSONObject().put("id", "${System.currentTimeMillis()}-${UUID.randomUUID().toString().take(8)}")
-            .put("schemaVersion", 2)
+            .put("schemaVersion", 3)
             .put("environment", JSONObject().put("manufacturer", android.os.Build.MANUFACTURER).put("model", android.os.Build.MODEL)
                 .put("android", android.os.Build.VERSION.RELEASE).put("sdk", android.os.Build.VERSION.SDK_INT)
                 .put("appVersion", runCatching { context.packageManager.getPackageInfo(context.packageName, 0).versionName }.getOrNull()))
             .put("resourcesStart", resourceSnapshot(context))
-            .put("startedAt", System.currentTimeMillis()).put("source", source).put("settings", settings)
-            .put("status", "ACTIVE").put("segments", JSONArray()).also { save(context, it) }
+            .put("startedAt", System.currentTimeMillis()).put("startedElapsed", android.os.SystemClock.elapsedRealtime())
+            .put("source", source).put("settings", settings)
+            .put("status", "ACTIVE").put("segments", JSONArray()).put("diagnostics", JSONArray()).also { save(context, it) }
+    }
+
+    fun diagnostic(context: Context, session: JSONObject, type: String, segment: Int, details: JSONObject = JSONObject()) {
+        val events = session.optJSONArray("diagnostics") ?: JSONArray().also { session.put("diagnostics", it) }
+        if (events.length() >= 240) {
+            events.remove(0)
+            session.put("droppedDiagnostics", session.optInt("droppedDiagnostics") + 1)
+        }
+        events.put(JSONObject().put("time", System.currentTimeMillis())
+            .put("elapsedMs", (android.os.SystemClock.elapsedRealtime() - session.optLong("startedElapsed")).coerceAtLeast(0))
+            .put("type", type).put("segment", segment).put("details", details))
+        save(context, session)
+    }
+
+    fun audioSummary(session: JSONObject, summary: AudioHealthTimeline.Snapshot) {
+        val intervals = JSONArray()
+        summary.intervals.forEach { item ->
+            intervals.put(JSONObject().put("state", item.state).put("startMs", item.startMs)
+                .put("endMs", item.endMs).put("durationMs", item.durationMs).put("error", item.error))
+        }
+        session.put("audioSummary", JSONObject().put("enabled", summary.enabled).put("currentState", summary.currentState)
+            .put("hadIssues", summary.hadIssues).put("issueCount", summary.issueCount)
+            .put("issueDurationMs", summary.issueDurationMs).put("intervals", intervals)
+            .put("droppedIntervals", summary.droppedIntervals))
     }
 
     fun segment(context: Context, session: JSONObject, path: String, name: String): JSONObject {
@@ -132,8 +157,9 @@ object RecordingJournal {
         item.put("bytes", size ?: 0).put("sizeKnown", size != null)
     }
 
-    fun sessions(context: Context): List<JSONObject> = directory(context).listFiles()
-        ?.filter { it.extension == "json" }?.sortedByDescending { it.name }?.mapNotNull {
+    fun sessions(context: Context, limit: Int? = null, sessionId: String? = null): List<JSONObject> = directory(context).listFiles()
+        ?.filter { it.extension == "json" && (sessionId == null || it.nameWithoutExtension == sessionId) }
+        ?.sortedByDescending { it.name }?.let { files -> if (limit == null) files else files.take(limit.coerceAtLeast(0)) }?.mapNotNull {
             runCatching { synchronized(this) { JSONObject(AtomicFile(it).openRead().bufferedReader().use { reader -> reader.readText() }) }.also { session ->
                 val files = session.getJSONArray("segments")
                 for (index in 0 until files.length()) {
