@@ -41,6 +41,6 @@
             <View android:layout_width="72dp" android:layout_height="72dp" android:layout_gravity="center" android:background="@drawable/shutter_ring" android:importantForAccessibility="no" />
             <View android:id="@+id/shutterCenter" android:layout_width="56dp" android:layout_height="56dp" android:layout_gravity="center" android:background="@drawable/shutter_center_video" android:importantForAccessibility="no" />
         </FrameLayout>
-        <com.google.android.material.button.MaterialButton android:id="@+id/btnSwitchFacing" style="@style/Widget.Material3.Button.IconButton" android:layout_width="52dp" android:layout_height="52dp" android:contentDescription="전면 후면 카메라 전환" android:text="↻" android:textSize="26sp" android:textColor="#FFFFFF" android:backgroundTint="#333333" />
+        <com.google.android.material.button.MaterialButton android:id="@+id/btnSwitchFacing" style="@style/Widget.Material3.Button.IconButton" android:layout_width="52dp" android:layout_height="52dp" android:contentDescription="전면 후면 카메라 전환" android:padding="0dp" android:backgroundTint="#333333" app:icon="@drawable/ic_switch_camera" app:iconGravity="textStart" app:iconSize="24dp" app:iconPadding="0dp" app:iconTint="#FFFFFF" />
     </LinearLayout>
 </androidx.constraintlayout.widget.ConstraintLayout>

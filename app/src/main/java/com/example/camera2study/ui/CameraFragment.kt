@@ -58,6 +58,7 @@ class CameraFragment : Fragment(), EntryLockListener {
     private var lastSummaryAt = 0L
     private var summaryText = ""
     private var resultSession = ""
+    private var lastUiPhase: RecordingPhase? = null
     private var infoDialog: androidx.appcompat.app.AlertDialog? = null
     private var thumbnailJob: Job? = null
     private var thumbnailCancellation: CancellationSignal? = null
@@ -84,8 +85,7 @@ class CameraFragment : Fragment(), EntryLockListener {
                 if (_binding != null) {
                     val active = RecordingRuntime.state.value?.active == true
                     binding.btnRecord.isEnabled = active || controller.areControlsReady()
-                    binding.btnSettings.isEnabled = !active && controller.areControlsReady()
-                    binding.btnSwitchFacing.isEnabled = binding.btnSettings.isEnabled
+                    updateControlAccess()
                     updateCaptureSummary(controller.recordingState, true)
                     if (!active) saveCameraSettings()
                 }
@@ -94,8 +94,7 @@ class CameraFragment : Fragment(), EntryLockListener {
                 updateLensIndicator(id); updateCaptureSummary(controller.recordingState, true)
                 val active = RecordingRuntime.state.value?.active == true
                 binding.btnRecord.isEnabled = active || controller.areControlsReady()
-                binding.btnSettings.isEnabled = !active && controller.areControlsReady()
-                binding.btnSwitchFacing.isEnabled = binding.btnSettings.isEnabled
+                updateControlAccess()
                 binding.previewView.post { fitPreview() }
             }
             controller.onRecordingEvent = { event -> handleRecordEvent(event) }
@@ -105,8 +104,11 @@ class CameraFragment : Fragment(), EntryLockListener {
                     binding.btnRecord.contentDescription = if (state.active) "녹화 중지" else "녹화 시작"
                     updateCaptureSummary(state)
                     binding.btnRecord.isEnabled = state.active || controller.areControlsReady()
-                    binding.btnSettings.isEnabled = !state.active && controller.areControlsReady()
-                    binding.btnSwitchFacing.isEnabled = binding.btnSettings.isEnabled
+                    if (lastUiPhase != state.phase) {
+                        lastUiPhase = state.phase
+                        updateControlAccess()
+                        updateZoomUi(controller.displayZoomRatio(), controller.getMaxZoomRatio())
+                    }
                     binding.btnPauseResume.visibility = if (state.phase == RecordingPhase.RECORDING || state.phase == RecordingPhase.PAUSED) View.VISIBLE else View.GONE
                     binding.btnPauseResume.isEnabled = state.phase == RecordingPhase.RECORDING || state.phase == RecordingPhase.PAUSED
                     binding.btnPauseResume.text = if (state.phase == RecordingPhase.PAUSED) "재개" else "일시정지"
@@ -169,8 +171,8 @@ class CameraFragment : Fragment(), EntryLockListener {
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
         binding.btnRecord.isEnabled = false
-        binding.btnSettings.isEnabled = false
-        binding.btnSwitchFacing.isEnabled = false
+        lastUiPhase = null
+        for (control in listOf(binding.btnSettings, binding.btnSwitchFacing, binding.btnBrightness)) control.showEnabled(false)
 
         // 비녹화 상태에서는 service를 명시적으로 시작하지 않는다.
         // bindService(BIND_AUTO_CREATE)로 service를 만들기만 하고, foreground 격상은 녹화 시작 시점에 한다.
@@ -254,6 +256,27 @@ class CameraFragment : Fragment(), EntryLockListener {
 
     private data class ZoomPreset(val button: MaterialButton, val ratio: Float)
 
+    private fun View.showEnabled(enabled: Boolean) {
+        isEnabled = enabled
+        alpha = if (enabled) 1f else 0.38f
+    }
+
+    private fun canAdjustLens(): Boolean {
+        val phase = RecordingRuntime.state.value?.phase
+        return controller.activeCameraId() != null && phase != RecordingPhase.PREPARING &&
+            phase != RecordingPhase.FINALIZING && phase != RecordingPhase.BETWEEN_SEGMENTS
+    }
+
+    private fun updateControlAccess() {
+        val settingsEnabled = RecordingRuntime.state.value?.active != true && controller.areControlsReady()
+        binding.btnSettings.showEnabled(settingsEnabled)
+        binding.btnSwitchFacing.showEnabled(settingsEnabled)
+        val exposureEnabled = canAdjustLens() && controller.getMaxExposureIndex() > controller.getMinExposureIndex()
+        binding.btnBrightness.showEnabled(exposureEnabled)
+        binding.sliderExposure.isEnabled = exposureEnabled
+        if (!exposureEnabled) binding.sliderExposure.visibility = View.GONE
+    }
+
     private val zoomPresets: List<ZoomPreset>
         get() = listOf(
             ZoomPreset(binding.btnZoom06, 0.6f),
@@ -290,11 +313,13 @@ class CameraFragment : Fragment(), EntryLockListener {
         binding.sliderZoom.valueTo = upper
         binding.sliderZoom.value = current.coerceIn(min, upper)
         binding.sliderZoom.visibility = if (max > min) View.VISIBLE else View.GONE
+        val canAdjust = canAdjustLens()
+        binding.sliderZoom.showEnabled(canAdjust)
         zoomPresets.forEach { preset ->
             val supported = controller.supportsZoomPreset(preset.ratio)
             val selected = kotlin.math.abs(preset.ratio - current) < 0.08f
             preset.button.visibility = if (supported) View.VISIBLE else View.GONE
-            preset.button.isEnabled = supported
+            preset.button.showEnabled(supported && canAdjust)
             preset.button.isSelected = selected
             preset.button.contentDescription = "%.1f배 확대".format(preset.ratio)
             ViewCompat.setStateDescription(preset.button, if (selected) "선택됨" else null)
