@@ -11,12 +11,16 @@ import java.nio.ByteOrder
 import java.util.concurrent.Executor
 
 /** One SDR transform shared by the preview and encoder, including headless recording. */
-class VideoLookProcessor(private val failure: (Throwable) -> Unit) : SurfaceProcessor {
+class VideoLookProcessor(
+    private val diagnostic: (String, String) -> Unit = { _, _ -> },
+    private val failure: (Throwable) -> Unit
+) : SurfaceProcessor {
     private val thread = HandlerThread("VideoLook").apply { start() }
     private val handler = Handler(thread.looper)
     val executor = Executor { handler.post(it) }
     @Volatile var look = VideoLook()
-    private var closing = false
+    @Volatile private var closing = false
+    @Volatile private var failed = false
     private var inputs = 0
     private var display = EGL14.EGL_NO_DISPLAY
     private var context = EGL14.EGL_NO_CONTEXT
@@ -24,10 +28,48 @@ class VideoLookProcessor(private val failure: (Throwable) -> Unit) : SurfaceProc
     private var pbuffer = EGL14.EGL_NO_SURFACE
     private var program = 0
     private val outputs = linkedMapOf<SurfaceOutput, EGLSurface>()
+    @Volatile private var lastInputAtMs = 0L
+    @Volatile private var lastVideoOutputAtMs = 0L
+    @Volatile private var lastInputTimestampNs = 0L
+    @Volatile private var inputFrames = 0L
+    @Volatile private var videoFrames = 0L
+    @Volatile private var outputCount = 0
+    data class Progress(val inputAtMs: Long, val videoOutputAtMs: Long, val inputTimestampNs: Long,
+                        val inputFrames: Long, val videoFrames: Long, val outputCount: Int)
+    fun progress(): Progress = Progress(lastInputAtMs, lastVideoOutputAtMs, lastInputTimestampNs,
+        inputFrames, videoFrames, outputCount)
     private val vertices = ByteBuffer.allocateDirect(16 * 4).order(ByteOrder.nativeOrder()).asFloatBuffer().apply {
         put(floatArrayOf(-1f,-1f,0f,0f, 1f,-1f,1f,0f, -1f,1f,0f,1f, 1f,1f,1f,1f)); position(0)
     }
-    val effect: CameraEffect = object : CameraEffect(CameraEffect.PREVIEW or CameraEffect.VIDEO_CAPTURE, executor, this, androidx.core.util.Consumer { failure(it) }) {}
+    val effect: CameraEffect = object : CameraEffect(CameraEffect.PREVIEW or CameraEffect.VIDEO_CAPTURE, executor, this,
+        androidx.core.util.Consumer { fatal(it) }) {}
+
+    private class EglFailure(message: String, val code: Int) : IllegalStateException("$message (EGL 0x${code.toString(16)})")
+    private fun fatal(error: Throwable) {
+        if (failed || closing) return
+        failed = true
+        diagnostic("effect_fatal", error.message.orEmpty())
+        failure(error)
+    }
+    private fun isVideo(output: SurfaceOutput) = output.targets and CameraEffect.VIDEO_CAPTURE != 0
+    private fun targetName(output: SurfaceOutput) = if (isVideo(output)) "video:${output.targets}" else "preview:${output.targets}"
+    private fun removeOutput(output: SurfaceOutput) {
+        outputs.remove(output)?.let { surface ->
+            // Stop writing and detach the current EGL surface before signalling safe release.
+            runCatching { current(pbuffer) }
+            EGL14.eglDestroySurface(display, surface)
+        }
+        outputCount = outputs.size
+        output.close()
+    }
+    private fun outputFailure(output: SurfaceOutput, error: Throwable) {
+        val previewSurfaceLost = !isVideo(output) && error is EglFailure &&
+            error.code in setOf(EGL14.EGL_BAD_SURFACE, EGL14.EGL_BAD_NATIVE_WINDOW)
+        removeOutput(output)
+        diagnostic(if (previewSurfaceLost) "effect_preview_removed" else "effect_output_error",
+            "${targetName(output)}: ${error.message.orEmpty()}")
+        if (!previewSurfaceLost) fatal(error)
+    }
 
     private fun initialize() {
         if (display != EGL14.EGL_NO_DISPLAY) return
@@ -56,44 +98,67 @@ precision highp float; uniform samplerExternalOES image; varying vec2 uv; unifor
         check(ok[0] != 0) { GLES20.glGetProgramInfoLog(program) }
         GLES20.glDeleteShader(vs); GLES20.glDeleteShader(ps)
     }
-    private fun current(surface: EGLSurface) { check(EGL14.eglMakeCurrent(display,surface,surface,context)) }
+    private fun current(surface: EGLSurface) {
+        if (!EGL14.eglMakeCurrent(display,surface,surface,context)) throw EglFailure("영상 효과 출력 연결 실패", EGL14.eglGetError())
+    }
     override fun onInputSurface(request: SurfaceRequest) {
-        if (closing) { request.willNotProvideSurface(); return }
+        if (closing || failed) { request.willNotProvideSurface(); return }
+        val texture = IntArray(1)
+        var pendingInput: SurfaceTexture? = null
+        var pendingSurface: Surface? = null
+        var counted = false
         try {
             initialize(); current(pbuffer)
-            val texture = IntArray(1); GLES20.glGenTextures(1,texture,0)
+            GLES20.glGenTextures(1,texture,0)
             GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES,texture[0])
             GLES20.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES,GLES20.GL_TEXTURE_MIN_FILTER,GLES20.GL_LINEAR)
             GLES20.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES,GLES20.GL_TEXTURE_MAG_FILTER,GLES20.GL_LINEAR)
             GLES20.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES,GLES20.GL_TEXTURE_WRAP_S,GLES20.GL_CLAMP_TO_EDGE)
             GLES20.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES,GLES20.GL_TEXTURE_WRAP_T,GLES20.GL_CLAMP_TO_EDGE)
-            val input = SurfaceTexture(texture[0])
+            val input = SurfaceTexture(texture[0]).also { pendingInput = it }
             input.setDefaultBufferSize(request.resolution.width,request.resolution.height)
-            val surface = Surface(input); inputs++
-            input.setOnFrameAvailableListener({ if (!closing) runCatching { draw(input,texture[0]) }.onFailure(failure) },handler)
+            val surface = Surface(input).also { pendingSurface = it }; inputs++; counted = true
+            diagnostic("effect_input_open", "${request.resolution.width}x${request.resolution.height}")
+            input.setOnFrameAvailableListener({ if (!closing && !failed) runCatching { draw(input,texture[0]) }.onFailure(::fatal) },handler)
             request.provideSurface(surface,executor) {
                 input.setOnFrameAvailableListener(null); surface.release(); input.release()
-                current(pbuffer); GLES20.glDeleteTextures(1,texture,0); inputs--; finishClose()
+                runCatching { current(pbuffer); GLES20.glDeleteTextures(1,texture,0) }
+                inputs--; diagnostic("effect_input_closed", "remaining=$inputs"); finishClose()
             }
-        } catch (e: Exception) { request.willNotProvideSurface(); failure(e) }
+        } catch (e: Exception) {
+            pendingInput?.setOnFrameAvailableListener(null)
+            pendingSurface?.release(); pendingInput?.release()
+            runCatching { current(pbuffer); GLES20.glDeleteTextures(1,texture,0) }
+            if (counted) inputs--
+            request.willNotProvideSurface(); fatal(e)
+        }
     }
     override fun onOutputSurface(output: SurfaceOutput) {
-        if (closing) { output.close(); return }
+        if (closing || failed) { output.close(); return }
         try {
             initialize()
             val surface = output.getSurface(executor) {
-                outputs.remove(output)?.let { egl -> EGL14.eglDestroySurface(display,egl) }
-                output.close(); finishClose()
+                removeOutput(output)
+                diagnostic("effect_output_closed", targetName(output)); finishClose()
             }
             val egl = EGL14.eglCreateWindowSurface(display,config,surface,intArrayOf(EGL14.EGL_NONE),0)
-            check(egl != EGL14.EGL_NO_SURFACE); outputs[output] = egl
-        } catch (e: Exception) { output.close(); failure(e) }
+            if (egl == EGL14.EGL_NO_SURFACE) throw EglFailure("영상 효과 출력 생성 실패", EGL14.eglGetError())
+            outputs[output] = egl
+            outputCount = outputs.size
+            diagnostic("effect_output_open", targetName(output))
+        } catch (e: Exception) { outputFailure(output, e) }
     }
     private fun draw(input: SurfaceTexture, texture: Int) {
         current(pbuffer); input.updateTexImage()
+        lastInputAtMs = android.os.SystemClock.elapsedRealtime()
+        lastInputTimestampNs = input.timestamp
+        inputFrames++
         val original = FloatArray(16); input.getTransformMatrix(original)
         val params = look.parameters()
-        for ((output,surface) in outputs.toMap()) {
+        // Submit the encoder first; a disappearing preview is not allowed to discard its frame.
+        for ((output,surface) in outputs.toList().sortedBy { if (isVideo(it.first)) 0 else 1 }) {
+            if (failed || closing) break
+            try {
             current(surface)
             GLES20.glViewport(0,0,output.size.width,output.size.height)
             GLES20.glUseProgram(program)
@@ -110,11 +175,14 @@ precision highp float; uniform samplerExternalOES image; varying vec2 uv; unifor
             vertices.position(2); GLES20.glEnableVertexAttribArray(uv); GLES20.glVertexAttribPointer(uv,2,GLES20.GL_FLOAT,false,16,vertices)
             GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP,0,4)
             check(GLES20.glGetError() == GLES20.GL_NO_ERROR) { "영상 효과 GPU 처리 실패" }
-            EGLExt.eglPresentationTimeANDROID(display,surface,input.timestamp)
-            check(EGL14.eglSwapBuffers(display,surface)) { "영상 효과 출력 실패" }
+            if (isVideo(output) && !EGLExt.eglPresentationTimeANDROID(display,surface,input.timestamp))
+                throw EglFailure("영상 효과 타임스탬프 적용 실패", EGL14.eglGetError())
+            if (!EGL14.eglSwapBuffers(display,surface)) throw EglFailure("영상 효과 출력 실패", EGL14.eglGetError())
+            if (isVideo(output)) { lastVideoOutputAtMs = android.os.SystemClock.elapsedRealtime(); videoFrames++ }
+            } catch (e: Exception) { outputFailure(output, e) }
         }
     }
-    fun close() { executor.execute { closing = true; outputs.keys.toList().forEach { it.close() }; finishClose() } }
+    fun close() { executor.execute { closing = true; outputs.keys.toList().forEach(::removeOutput); finishClose() } }
     private fun finishClose() {
         if (!closing || inputs > 0) return
         if (display != EGL14.EGL_NO_DISPLAY) {

@@ -356,11 +356,20 @@ class CameraController(private val context: Context) {
             previewUseCase = null
             if (!isHdrEnabled && usesVideoEffect()) {
                 val generation = cameraGeneration
-                lookProcessor = com.example.camera2study.util.VideoLookProcessor { error ->
+                lookProcessor = com.example.camera2study.util.VideoLookProcessor(diagnostic = { type, message ->
+                    mainHandler.post {
+                        if (!released && generation == cameraGeneration)
+                            recordDiagnostic(type, org.json.JSONObject().put("message", message.take(500)))
+                    }
+                }) { error ->
                     mainHandler.post {
                         if (!released && generation == cameraGeneration) {
-                            reportError("색보정 처리 실패: " + error.message)
-                            if (isRecording()) stopRecording("effect_error")
+                            val message = "색보정 처리 실패: " + error.message
+                            if (isRecording()) {
+                                failure = message
+                                reportError(message)
+                                stopRecording("effect_error")
+                            } else failPreparation(message)
                         }
                     }
                 }.also { it.look = videoLook.normalized(); group.addEffect(it.effect) }
@@ -718,6 +727,7 @@ class CameraController(private val context: Context) {
     private var recordingToken = 0L
     private var lastProgressAt = 0L
     private var lastJournalAt = 0L
+    private var lastProgressDiagnosticAt = 0L
     private var phaseSince = 0L
     private var sessionSegmentMs = LONG_RECORDING_SEGMENT_MS
     private var sessionPlan = RecordingPlan(LONG_RECORDING_SEGMENT_MS)
@@ -750,6 +760,19 @@ class CameraController(private val context: Context) {
             .put("recordedMs", at).put("error", stats.errorCause?.message.orEmpty().take(500)))
     }
 
+    private fun progressDetails(now: Long = android.os.SystemClock.elapsedRealtime()): org.json.JSONObject {
+        val result = org.json.JSONObject().put("recordedMs", sessionDurationMs + segmentDurationMs)
+            .put("segmentMs", segmentDurationMs).put("encodedBytes", segmentBytes)
+            .put("lastRecorderProgressAgeMs", (now - lastProgressAt).coerceAtLeast(0))
+        lookProcessor?.progress()?.let { effect ->
+            result.put("effectInputAgeMs", if (effect.inputAtMs == 0L) -1 else now - effect.inputAtMs)
+                .put("effectVideoOutputAgeMs", if (effect.videoOutputAtMs == 0L) -1 else now - effect.videoOutputAtMs)
+                .put("effectInputTimestampNs", effect.inputTimestampNs).put("effectInputFrames", effect.inputFrames)
+                .put("effectVideoFrames", effect.videoFrames).put("effectOutputs", effect.outputCount)
+        }
+        return result
+    }
+
     private fun publish(phase: RecordingPhase, message: String) {
         if (recordingState.phase != phase) phaseSince = android.os.SystemClock.elapsedRealtime()
         RecordingRuntime.state.value = RecordingState(phase, session?.optString("id").orEmpty(),
@@ -762,6 +785,10 @@ class CameraController(private val context: Context) {
         override fun run() {
             if (!isRecording() || released) return
             val now = android.os.SystemClock.elapsedRealtime()
+            if (now - lastProgressDiagnosticAt >= 15_000L) {
+                recordDiagnostic("recording_progress", progressDetails(now))
+                lastProgressDiagnosticAt = now
+            }
             if (recordingState.phase != RecordingPhase.FINALIZING) {
                 com.example.camera2study.util.CaptureHealth.problem(context, audioEnabled, false)?.let {
                     failure = it
@@ -771,8 +798,7 @@ class CameraController(private val context: Context) {
             when (recordingState.phase) {
                 RecordingPhase.PREPARING, RecordingPhase.RECORDING -> {
                     if (now - lastProgressAt > 15_000L) {
-                        recordDiagnostic("recording_progress_timeout", org.json.JSONObject().put("stalledMs", now - lastProgressAt)
-                            .put("durationMs", segmentDurationMs).put("encodedBytes", segmentBytes))
+                        recordDiagnostic("recording_progress_timeout", progressDetails(now))
                         failure = "영상 데이터 기록이 15초 동안 진행되지 않았습니다"
                         reportError(failure!!)
                         stopRecording("progress_timeout")
@@ -816,6 +842,7 @@ class CameraController(private val context: Context) {
         currentRepeatCount = 0
         sessionDurationMs = 0
         sessionBytes = 0
+        lastProgressDiagnosticAt = android.os.SystemClock.elapsedRealtime()
         audioHealth = com.example.camera2study.util.AudioHealthTimeline(audioEnabled)
         session?.let { com.example.camera2study.util.RecordingJournal.audioSummary(it, audioHealth.snapshot(0)) }
         recordDiagnostic("configuration_ready", org.json.JSONObject().put("cameraId", activeCameraId())
@@ -902,6 +929,7 @@ class CameraController(private val context: Context) {
                         val now = android.os.SystemClock.elapsedRealtime()
                         if (now - lastJournalAt > 5_000L) {
                             segmentEntry?.put("durationMs", segmentDurationMs)?.put("bytes", segmentBytes)
+                                ?.put("captureProgress", progressDetails(now))
                             com.example.camera2study.util.RecordingJournal.sampleResources(context, journal)
                             com.example.camera2study.util.RecordingJournal.save(context, journal)
                             lastJournalAt = now
