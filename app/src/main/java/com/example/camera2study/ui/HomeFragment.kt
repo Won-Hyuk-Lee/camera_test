@@ -45,7 +45,7 @@ class HomeFragment : Fragment() {
         binding.cardFastRecord.setOnClickListener {
             if (PermissionHelper.allGranted(requireContext(), com.example.camera2study.util.CameraSettingsStore.load(requireContext(), true).audioEnabled)) {
                 com.example.camera2study.CameraForegroundService.requestQuickRecording(requireContext())
-                Toast.makeText(requireContext(), "빠른 녹화를 요청했습니다. 알림에서 상태를 확인하세요", Toast.LENGTH_LONG).show()
+                Toast.makeText(requireContext(), "빠른 녹화를 요청했습니다. 촬영 화면이나 홈 위젯에서 중지할 수 있습니다", Toast.LENGTH_LONG).show()
             } else {
                 Toast.makeText(
                     requireContext(),
