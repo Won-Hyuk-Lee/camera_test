@@ -146,21 +146,33 @@ class PrivateVaultFragment : Fragment(), com.example.camera2study.EntryLockListe
 
     private fun showExportQueue() {
         if (!authenticated()) return
-        val content = LinearLayout(requireContext()).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(12), dp(8), dp(12), dp(8)) }
-        val scroll = ScrollView(requireContext()).apply { addView(content) }
+        val builder = MaterialAlertDialogBuilder(requireContext()).setTitle("내보내기 전체 작업")
+        val dialogContext = builder.context
+        val content = LinearLayout(dialogContext).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(12), dp(8), dp(12), dp(8)) }
+        val scroll = dialogScroll(dialogContext, content)
         val buttons = linkedMapOf<String, Button>()
         val observer = androidx.lifecycle.Observer<List<VaultExports.Job>> { jobs ->
             if (buttons.keys.toList() != jobs.map { it.id }) {
                 content.removeAllViews(); buttons.clear()
-                if (jobs.isEmpty()) content.addView(TextView(requireContext()).apply { text = "내보내기 작업이 없습니다" })
-                jobs.forEach { job -> Button(requireContext()).also { buttons[job.id] = it; content.addView(it) } }
+                if (jobs.isEmpty()) content.addView(TextView(dialogContext).apply { text = "내보내기 작업이 없습니다" })
+                jobs.forEach { job -> Button(dialogContext).also { buttons[job.id] = it; content.addView(it) } }
             }
             jobs.forEach { job -> buttons[job.id]?.let { bindExportButton(it, job) } }
         }
-        val dialog = MaterialAlertDialogBuilder(requireContext()).setTitle("내보내기 전체 작업")
-            .setView(scroll).setPositiveButton("닫기", null).create()
+        val dialog = builder.setView(scroll).setPositiveButton("닫기", null).create()
         trackDialog(dialog) { VaultExports.state.removeObserver(observer); buttons.clear() }
         VaultExports.state.observe(viewLifecycleOwner, observer)
+    }
+
+    /** Leave room for the title and dialog actions. The body scrolls even in landscape or with large text. */
+    private fun dialogScroll(context: Context, content: View) = object : ScrollView(context) {
+        init { isScrollbarFadingEnabled = false; addView(content) }
+        override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+            val cap = (resources.displayMetrics.heightPixels * .55f).toInt().coerceAtLeast(1)
+            val allowed = if (View.MeasureSpec.getMode(heightMeasureSpec) == View.MeasureSpec.UNSPECIFIED) cap
+                else minOf(cap, View.MeasureSpec.getSize(heightMeasureSpec))
+            super.onMeasure(widthMeasureSpec, View.MeasureSpec.makeMeasureSpec(allowed, View.MeasureSpec.AT_MOST))
+        }
     }
 
     private fun authenticated() = (activity as? com.example.camera2study.MainActivity)?.isEntryAuthenticated() == true
@@ -283,18 +295,29 @@ class PrivateVaultFragment : Fragment(), com.example.camera2study.EntryLockListe
         }
         if (inspectionJob?.isActive == true) { toast("진행 중인 검사를 먼저 닫아 주세요"); return }
         val ctx = requireContext().applicationContext
-        val content = LinearLayout(requireContext()).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(20), dp(12), dp(20), dp(12)) }
-        val message = TextView(requireContext()).apply {
+        val builder = MaterialAlertDialogBuilder(requireContext()).setTitle("영상 시간정보 검사")
+        val dialogContext = builder.context
+        val content = LinearLayout(dialogContext).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(20), dp(12), dp(20), dp(12)) }
+        val message = TextView(dialogContext).apply {
             text = "영상 시간정보 검사 준비 중\n최대 30초 동안 확인하며, 한도에 도달하면 일부 검사로 표시합니다."
-            setTextColor(Color.WHITE); textSize = 15f
+            setTextColor(com.google.android.material.color.MaterialColors.getColor(this, com.google.android.material.R.attr.colorOnSurface))
+            textSize = 15f
         }
-        val progress = ProgressBar(requireContext(), null, android.R.attr.progressBarStyleHorizontal).apply { max = 100 }
+        val progress = ProgressBar(dialogContext, null, android.R.attr.progressBarStyleHorizontal).apply { max = 100 }
         content.addView(message); content.addView(progress)
-        val dialog = MaterialAlertDialogBuilder(requireContext()).setTitle("영상 시간정보 검사")
-            .setView(ScrollView(requireContext()).apply { addView(content) }).setNegativeButton("검사 취소 / 닫기", null).create()
+        val scroll = dialogScroll(dialogContext, content)
+        val dialog = builder.setView(scroll).setNegativeButton("검사 취소", null).create()
         var work: Job? = null
         var running = true
         trackDialog(dialog) { running = false; work?.cancel() }
+        fun finishInspection(text: String) {
+            running = false
+            if (!dialog.isShowing) return
+            message.text = text
+            progress.visibility = View.GONE
+            dialog.getButton(android.content.DialogInterface.BUTTON_NEGATIVE)?.text = "닫기"
+            scroll.scrollTo(0, 0)
+        }
         work = viewLifecycleOwner.lifecycleScope.launch {
             try {
                 val operation = currentCoroutineContext()
@@ -306,16 +329,13 @@ class PrivateVaultFragment : Fragment(), com.example.camera2study.EntryLockListe
                     VideoTrackInspector.save(ctx, file, result)
                     result
                 }
-                running = false
                 inspectionResults[file.absolutePath] = report
-                if (dialog.isShowing) { message.text = report.details(); progress.visibility = View.GONE }
+                finishInspection(report.details())
                 renderRows()
             } catch (_: CancellationException) {
-                running = false
-                if (dialog.isShowing) { message.text = "검사를 중지했습니다. 녹화가 끝난 뒤 다시 검사할 수 있습니다."; progress.visibility = View.GONE }
+                finishInspection("검사를 중지했습니다. 녹화가 끝난 뒤 다시 검사할 수 있습니다.")
             } catch (error: Exception) {
-                running = false
-                if (dialog.isShowing) { message.text = "검사하지 못했습니다: ${error.message}\n원본 영상은 변경하지 않았습니다."; progress.visibility = View.GONE }
+                finishInspection("검사하지 못했습니다: ${error.message}\n원본 영상은 변경하지 않았습니다.")
             } finally { if (inspectionJob === work) inspectionJob = null }
         }
         inspectionJob = work
