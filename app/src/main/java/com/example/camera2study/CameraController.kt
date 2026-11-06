@@ -76,6 +76,7 @@ class CameraController(private val context: Context) {
     private var exposureReady = false
     private var optionsReady = false
     private var preparationError: String? = null
+    private val controlErrors = mutableMapOf<String, String>()
     private var preparationCallback: ((String?) -> Unit)? = null
     fun areControlsReady(): Boolean = !released && camera != null && zoomReady && exposureReady && optionsReady && preparationError == null
 
@@ -97,14 +98,21 @@ class CameraController(private val context: Context) {
         callback(error)
     }
 
-    private fun failPreparation(message: String) {
-        preparationError = message
+    private fun retryControl(control: String) {
+        controlErrors.remove(control)
+        preparationError = controlErrors.values.firstOrNull()
+    }
+
+    private fun failPreparation(message: String, control: String = "configuration") {
+        controlErrors[control] = message
+        preparationError = controlErrors.values.firstOrNull()
         reportError(message)
         completePreparation(message)
     }
 
     private fun notifyControlsApplied() {
         if (!areControlsReady()) return
+        lastError = null
         // Persist acknowledged live adjustments even if the recording screen is closed next.
         // Quick recording keeps its explicitly saved profile independent of the normal profile.
         if (isRecording() && session?.optString("source") == "app") {
@@ -324,6 +332,7 @@ class CameraController(private val context: Context) {
         exposureReady = false
         optionsReady = false
         preparationError = null
+        controlErrors.clear()
         try {
             val selector = buildSelector()
             val info = selector.filter(provider.availableCameraInfos).firstOrNull()
@@ -414,6 +423,7 @@ class CameraController(private val context: Context) {
         val generation = cameraGeneration
         val request = ++optionsRequest
         optionsReady = false
+        retryControl("options")
         val control = Camera2CameraControl.from(cam.cameraControl)
         val builder = CaptureRequestOptions.Builder()
         // CameraX owns output rotation. Disable the framework's additional crop/rotation.
@@ -492,7 +502,7 @@ class CameraController(private val context: Context) {
             runCatching { future.get() }.onSuccess {
                 optionsReady = true
                 notifyControlsApplied()
-            }.onFailure { failPreparation("카메라 설정 적용 실패: ${it.message}") }
+            }.onFailure { failPreparation("카메라 설정 적용 실패: ${it.message}", "options") }
         }, ContextCompat.getMainExecutor(context))
     }
 
@@ -520,6 +530,7 @@ class CameraController(private val context: Context) {
         val generation = cameraGeneration
         val request = ++zoomRequest
         zoomReady = false
+        retryControl("zoom")
         val applied = ratio.coerceIn(nativeMin(), nativeMax())
         val future = cam.cameraControl.setZoomRatio(applied)
         future.addListener({
@@ -535,7 +546,7 @@ class CameraController(private val context: Context) {
                 if (allowRebind && !isRecording()) {
                     pendingZoomAfterBind = applied
                     bindUseCases()
-                } else failPreparation("배율 적용 실패: ${it.message}")
+                } else failPreparation("배율 적용 실패: ${it.message}", "zoom")
             }
         }, ContextCompat.getMainExecutor(context))
     }
@@ -701,6 +712,7 @@ class CameraController(private val context: Context) {
         if (exposureTimeNs != null) { exposureReady = true; reportError("수동 셔터 사용 중에는 노출 보정을 사용할 수 없습니다"); return }
         val state = cam.cameraInfo.exposureState
         if (!state.isExposureCompensationSupported) { exposureReady = true; notifyControlsApplied(); return }
+        retryControl("exposure")
         val clamped = index.coerceIn(getMinExposureIndex(), getMaxExposureIndex())
         val future = cam.cameraControl.setExposureCompensationIndex(clamped)
         future.addListener({
@@ -709,7 +721,7 @@ class CameraController(private val context: Context) {
                 exposureEv = it * state.exposureCompensationStep.toFloat()
                 exposureReady = true
                 notifyControlsApplied()
-            }.onFailure { failPreparation("밝기 적용 실패: ${it.message}") }
+            }.onFailure { failPreparation("밝기 적용 실패: ${it.message}", "exposure") }
         }, ContextCompat.getMainExecutor(context))
     }
 
