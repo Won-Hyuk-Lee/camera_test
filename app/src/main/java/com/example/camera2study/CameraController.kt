@@ -126,6 +126,8 @@ class CameraController(private val context: Context) {
     var lastError: String? = null
         private set
     var onError: ((String) -> Unit)? = null
+    /** Only synchronous bindToLifecycle failures; capability and control failures stay separate. */
+    var onBindingError: ((Throwable) -> Unit)? = null
 
     fun configure(block: () -> Unit) {
         if (isRecording()) return
@@ -333,6 +335,7 @@ class CameraController(private val context: Context) {
         optionsReady = false
         preparationError = null
         controlErrors.clear()
+        var bindingFailed = false
         try {
             val selector = buildSelector()
             val info = selector.filter(provider.availableCameraInfos).firstOrNull()
@@ -383,7 +386,10 @@ class CameraController(private val context: Context) {
                     }
                 }.also { it.look = videoLook.normalized(); group.addEffect(it.effect) }
             }
-            camera = provider.bindToLifecycle(owner, selector, group.build())
+            val useCases = group.build()
+            bindingFailed = true
+            camera = provider.bindToLifecycle(owner, selector, useCases)
+            bindingFailed = false
             lastCameraState = null
             observedCameraInfo = camera?.cameraInfo
             observedCameraInfo?.cameraState?.observe(owner, cameraStateObserver)
@@ -401,6 +407,7 @@ class CameraController(private val context: Context) {
             return true
         } catch (e: Exception) {
             failPreparation("촬영 설정 적용 실패: ${e.message}")
+            if (bindingFailed) onBindingError?.invoke(e)
             return false
         }
     }
@@ -1070,6 +1077,7 @@ class CameraController(private val context: Context) {
         onCameraChanged = null
         onZoomChanged = null
         onError = null
+        onBindingError = null
         onControlsApplied = null
         releaseWakeLock()
         unbindOwnedUseCases()
