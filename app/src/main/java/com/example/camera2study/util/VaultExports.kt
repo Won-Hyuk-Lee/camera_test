@@ -201,11 +201,10 @@ object VaultExports {
                 putInt(MediaStore.QUERY_ARG_MATCH_TRASHED, MediaStore.MATCH_INCLUDE)
             }
             resolver.query(collection, projection, query, null)
-        } else {
-            check(android.os.Build.VERSION.SDK_INT >= 29) { "Android 10 이상에서 내보내기 항목을 정리할 수 있습니다" }
+        } else if (android.os.Build.VERSION.SDK_INT >= 29) {
             @Suppress("DEPRECATION")
             resolver.query(MediaStore.setIncludePending(collection), projection, selection, ids, null)
-        }
+        } else error("Android 10 이상에서 내보내기 항목을 정리할 수 있습니다")
         return checkNotNull(cursor) { "내보내기 항목 존재 여부를 확인할 수 없습니다" }.use { it.moveToFirst() }
     }
 
