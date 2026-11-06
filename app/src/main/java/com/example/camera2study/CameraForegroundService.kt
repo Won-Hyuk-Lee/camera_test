@@ -25,6 +25,7 @@ class CameraForegroundService : LifecycleService() {
     private var applyingPending = false
     private var preparationToken = 0L
     private var source = "app"
+    val currentSource: String get() = source
     private var foreground = false
     private val handler = Handler(Looper.getMainLooper())
     private var lastUpdate = 0L

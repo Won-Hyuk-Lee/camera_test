@@ -143,7 +143,20 @@ class CameraController(private val context: Context) {
     private var exposureTimeNs: Long? = null
     var manualIso: Int = 400
     var videoLook = com.example.camera2study.util.VideoLook()
+    /** Settings preview keeps the SDR processor alive for instant original/effect comparison. */
+    var keepPreviewEffect = false
     private var lookProcessor: com.example.camera2study.util.VideoLookProcessor? = null
+    fun updatePreviewLook(value: com.example.camera2study.util.VideoLook): Boolean {
+        if (released || isRecording()) return false
+        val normalized = value.normalized()
+        if (isHdrEnabled && !normalized.isIdentity()) return false
+        videoLook = normalized
+        val processor = lookProcessor
+        if (processor != null) processor.look = normalized
+        else if (!normalized.isIdentity()) return bindUseCases()
+        return true
+    }
+    private fun usesVideoEffect(): Boolean = !videoLook.isIdentity() || (keepPreviewEffect && !isHdrEnabled)
     private var aperture: Float? = null
     private var manualWbGains: FloatArray? = null
 
@@ -280,34 +293,29 @@ class CameraController(private val context: Context) {
         onError?.invoke(message)
     }
 
-    private fun bindUseCases() {
-        val provider = cameraProvider ?: return
-        val owner = lifecycleOwner ?: return
+    private fun unbindOwnedUseCases() {
+        val owned = listOfNotNull(previewUseCase, videoCapture)
+        if (owned.isNotEmpty()) cameraProvider?.unbind(*owned.toTypedArray())
+    }
 
-        if (isRecording() || configuring || released) return
+    private fun bindUseCases(): Boolean {
+        val provider = cameraProvider ?: return false
+        val owner = lifecycleOwner ?: return false
+
+        if (isRecording() || configuring || released) return false
 
         cameraGeneration++
         zoomReady = false
         exposureReady = false
         optionsReady = false
         preparationError = null
-        provider.unbindAll()
-        lookProcessor?.close(); lookProcessor = null
-        camera = null
-        videoCapture = null
-        previewUseCase = null
-
         try {
             val selector = buildSelector()
             val info = selector.filter(provider.availableCameraInfos).firstOrNull()
                 ?: error("선택한 카메라가 공개되지 않았습니다")
-            val capabilities = Recorder.getVideoCapabilities(info)
-            check(!isHdrEnabled || videoLook.isIdentity()) { "색보정은 SDR 전용입니다. HDR을 끄거나 색보정을 기본값으로 초기화하세요" }
-            val dynamicRange = if (isHdrEnabled) capabilities.supportedDynamicRanges.firstOrNull {
-                it != androidx.camera.core.DynamicRange.SDR && it.bitDepth == androidx.camera.core.DynamicRange.BIT_DEPTH_10_BIT
-            } ?: error("선택한 카메라는 HDR 녹화를 지원하지 않습니다") else androidx.camera.core.DynamicRange.SDR
-            check(videoQuality in capabilities.getSupportedQualities(dynamicRange)) { "선택한 화질/HDR 조합은 지원하지 않습니다. 촬영 설정을 변경하세요" }
-            check(info.supportedFrameRateRanges.any { it.contains(targetFps) }) { "선택한 FPS는 지원하지 않습니다" }
+            com.example.camera2study.util.VideoConfigurationSupport.problem(info, videoQuality, targetFps,
+                isHdrEnabled, usesVideoEffect())?.let { error(it) }
+            val dynamicRange = checkNotNull(com.example.camera2study.util.VideoConfigurationSupport.dynamicRange(info, isHdrEnabled))
             val recorder = Recorder.Builder().setQualitySelector(QualitySelector.from(videoQuality))
                 .setAspectRatio(androidx.camera.core.AspectRatio.RATIO_16_9).build()
             val video = VideoCapture.Builder(recorder).setTargetRotation(outputRotation())
@@ -325,10 +333,17 @@ class CameraController(private val context: Context) {
             val group = androidx.camera.core.UseCaseGroup.Builder()
                 .setViewPort(androidx.camera.core.ViewPort.Builder(ratio, rotation).setScaleType(androidx.camera.core.ViewPort.FILL_CENTER).build())
                 .addUseCase(preview).addUseCase(video)
-            if (!isHdrEnabled && !videoLook.isIdentity()) {
+            // All capability checks happen before releasing the last working configuration.
+            unbindOwnedUseCases()
+            lookProcessor?.close(); lookProcessor = null
+            camera = null
+            videoCapture = null
+            previewUseCase = null
+            if (!isHdrEnabled && usesVideoEffect()) {
+                val generation = cameraGeneration
                 lookProcessor = com.example.camera2study.util.VideoLookProcessor { error ->
                     mainHandler.post {
-                        if (!released) {
+                        if (!released && generation == cameraGeneration) {
                             reportError("색보정 처리 실패: " + error.message)
                             if (isRecording()) stopRecording("effect_error")
                         }
@@ -347,8 +362,10 @@ class CameraController(private val context: Context) {
 
             val activeId = camera?.let { Camera2CameraInfo.from(it.cameraInfo).cameraId }
             onCameraChanged?.invoke(activeId)
+            return true
         } catch (e: Exception) {
             failPreparation("촬영 설정 적용 실패: ${e.message}")
+            return false
         }
     }
 
@@ -502,18 +519,28 @@ class CameraController(private val context: Context) {
         if (ratio in getMinZoomRatio()..getMaxZoomRatio()) return true
         if (!isFacingBack() || isRecording()) return false
         return cameraProvider?.availableCameraInfos.orEmpty().filter { it.lensFacing == CameraSelector.LENS_FACING_BACK }.any {
-            val scale = lensScale(Camera2CameraInfo.from(it).cameraId)
-            val z = it.zoomState.value
-            z != null && ratio >= z.minZoomRatio * scale - 0.08f && ratio <= z.maxZoomRatio * scale
+            coversDisplayZoom(it, ratio) && supportsCurrentConfiguration(it)
         }
     }
+
+    private fun coversDisplayZoom(info: androidx.camera.core.CameraInfo, ratio: Float): Boolean {
+        val scale = lensScale(Camera2CameraInfo.from(info).cameraId)
+        val zoom = info.zoomState.value ?: return false
+        return ratio >= zoom.minZoomRatio * scale - 0.08f && ratio <= zoom.maxZoomRatio * scale
+    }
+
+    private fun supportsCurrentConfiguration(info: androidx.camera.core.CameraInfo): Boolean =
+        com.example.camera2study.util.VideoConfigurationSupport.problem(info, videoQuality, targetFps,
+            isHdrEnabled, usesVideoEffect()) == null
 
     fun selectBackZoomMode(modeRatio: Float): Boolean = selectZoomPreset(modeRatio)
 
     fun selectZoomPreset(ratio: Float): Boolean {
         if (!supportsZoomPreset(ratio)) { reportError("이 카메라에서 지원하지 않는 배율입니다"); return false }
         if (!isFacingBack() || isRecording()) { setDisplayZoomRatio(ratio); return true }
-        val candidates = cameraProvider?.availableCameraInfos.orEmpty().filter { it.lensFacing == CameraSelector.LENS_FACING_BACK }
+        val candidates = cameraProvider?.availableCameraInfos.orEmpty().filter {
+            it.lensFacing == CameraSelector.LENS_FACING_BACK && coversDisplayZoom(it, ratio) && supportsCurrentConfiguration(it)
+        }
         val primary = runCatching { CameraSelector.DEFAULT_BACK_CAMERA.filter(candidates).firstOrNull() }.getOrNull()
         // Prefer a publicly exposed optical lens at telephoto presets; otherwise let the logical camera crop/switch.
         val physical = candidates.filter {
@@ -522,13 +549,20 @@ class CameraController(private val context: Context) {
             z != null && ((ratio < 1f && scale < 0.85f) || (ratio >= 2f && scale > 1.5f)) &&
                 ratio >= z.minZoomRatio * scale - 0.08f && ratio <= z.maxZoomRatio * scale
         }.maxByOrNull { lensScale(Camera2CameraInfo.from(it).cameraId) }
-        val desired = physical ?: primary
+        val desired = physical ?: primary ?: camera?.cameraInfo
         val id = desired?.let { Camera2CameraInfo.from(it).cameraId }
         if (id == null || id == activeCameraId()) { setDisplayZoomRatio(ratio); return true }
+        val previousId = selectedCameraId
+        val previousZoom = zoomRatio
         selectedCameraId = id
         pendingZoomAfterBind = ratio / lensScale(id)
+        if (bindUseCases()) return true
+        val error = lastError
+        selectedCameraId = previousId
+        pendingZoomAfterBind = previousZoom
         bindUseCases()
-        return camera != null
+        reportError("배율 전환에 실패해 이전 렌즈로 복구합니다: ${error.orEmpty()}")
+        return false
     }
 
     private fun applyPendingZoomAfterBind() {
@@ -560,8 +594,21 @@ class CameraController(private val context: Context) {
 
     fun selectBackLens(cameraId: String) {
         if (isRecording()) return
+        val info = cameraProvider?.availableCameraInfos?.firstOrNull { Camera2CameraInfo.from(it).cameraId == cameraId }
+        if (info == null || !supportsCurrentConfiguration(info)) {
+            reportError("현재 촬영 설정을 지원하지 않는 렌즈입니다")
+            return
+        }
+        val previousBack = isFacingBack()
+        val previousId = selectedCameraId
+        val previousZoom = zoomRatio
         restoreCameraSelection(true, cameraId, 1f)
-        bindUseCases()
+        if (!bindUseCases()) {
+            val error = lastError
+            restoreCameraSelection(previousBack, previousId, previousZoom)
+            bindUseCases()
+            reportError("렌즈 전환에 실패해 이전 설정으로 복구합니다: ${error.orEmpty()}")
+        }
     }
 
     fun activeCameraId(): String? =
@@ -919,7 +966,7 @@ class CameraController(private val context: Context) {
         onError = null
         onControlsApplied = null
         releaseWakeLock()
-        cameraProvider?.unbindAll()
+        unbindOwnedUseCases()
         lookProcessor?.close(); lookProcessor = null
         camera = null
         videoCapture = null
