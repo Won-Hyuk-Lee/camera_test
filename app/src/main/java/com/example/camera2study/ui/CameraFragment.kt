@@ -23,15 +23,24 @@ import androidx.camera.video.Quality
 import androidx.camera.video.VideoRecordEvent
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.Fragment
+import androidx.core.view.ViewCompat
+import androidx.lifecycle.lifecycleScope
 import com.example.camera2study.CameraController
 import com.example.camera2study.CameraForegroundService
 import com.example.camera2study.EntryLockListener
+import com.example.camera2study.MainActivity
+import com.example.camera2study.RecordingPhase
+import com.example.camera2study.RecordingRuntime
 import com.example.camera2study.R
 import com.example.camera2study.databinding.FragmentCameraBinding
 import com.example.camera2study.util.CameraUtils
 import com.example.camera2study.util.CameraSettingsStore
 import com.google.android.material.button.MaterialButton
 import java.io.File
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class CameraFragment : Fragment(), EntryLockListener {
 
@@ -49,12 +58,15 @@ class CameraFragment : Fragment(), EntryLockListener {
     private var lastSummaryAt = 0L
     private var summaryText = ""
     private var resultSession = ""
+    private var infoDialog: androidx.appcompat.app.AlertDialog? = null
+    private var thumbnailJob: Job? = null
+    private var thumbnailCancellation: CancellationSignal? = null
     private val timerRunnable = object : Runnable {
         override fun run() {
             val binding = _binding ?: return
             if (!::controller.isInitialized) return
             val elapsed = controller.recordingState.durationMs
-            binding.txtTimer.text = formatElapsed(elapsed) + " · " + controller.recordingState.message
+            binding.txtTimer.text = formatElapsed(elapsed) + " · " + phaseLabel(controller.recordingState.phase)
             binding.txtTimer.postDelayed(this, 200L)
         }
     }
@@ -70,17 +82,19 @@ class CameraFragment : Fragment(), EntryLockListener {
             // 컨트롤러 이벤트 바인딩
             controller.onControlsApplied = {
                 if (_binding != null) {
-                    binding.btnRecord.isEnabled = true
-                    binding.btnSettings.isEnabled = !controller.isRecording()
-                    binding.btnSwitchFacing.isEnabled = !controller.isRecording()
+                    val active = RecordingRuntime.state.value?.active == true
+                    binding.btnRecord.isEnabled = active || controller.areControlsReady()
+                    binding.btnSettings.isEnabled = !active && controller.areControlsReady()
+                    binding.btnSwitchFacing.isEnabled = binding.btnSettings.isEnabled
                     updateCaptureSummary(controller.recordingState, true)
-                    if (!controller.isRecording()) saveCameraSettings()
+                    if (!active) saveCameraSettings()
                 }
             }
             controller.onCameraChanged = { id ->
                 updateLensIndicator(id); updateCaptureSummary(controller.recordingState, true)
-                binding.btnRecord.isEnabled = controller.isRecording() || controller.areControlsReady()
-                binding.btnSettings.isEnabled = !controller.isRecording() && controller.areControlsReady()
+                val active = RecordingRuntime.state.value?.active == true
+                binding.btnRecord.isEnabled = active || controller.areControlsReady()
+                binding.btnSettings.isEnabled = !active && controller.areControlsReady()
                 binding.btnSwitchFacing.isEnabled = binding.btnSettings.isEnabled
                 binding.previewView.post { fitPreview() }
             }
@@ -93,7 +107,11 @@ class CameraFragment : Fragment(), EntryLockListener {
                     binding.btnRecord.isEnabled = state.active || controller.areControlsReady()
                     binding.btnSettings.isEnabled = !state.active && controller.areControlsReady()
                     binding.btnSwitchFacing.isEnabled = binding.btnSettings.isEnabled
-                    binding.txtTimer.text = formatElapsed(state.durationMs) + " · " + state.message
+                    binding.btnPauseResume.visibility = if (state.phase == RecordingPhase.RECORDING || state.phase == RecordingPhase.PAUSED) View.VISIBLE else View.GONE
+                    binding.btnPauseResume.isEnabled = state.phase == RecordingPhase.RECORDING || state.phase == RecordingPhase.PAUSED
+                    binding.btnPauseResume.text = if (state.phase == RecordingPhase.PAUSED) "재개" else "일시정지"
+                    binding.txtTimer.text = formatElapsed(state.durationMs) + " · " + phaseLabel(state.phase)
+                    ViewCompat.setStateDescription(binding.btnRecord, phaseLabel(state.phase))
                 }
             }
             controller.onZoomChanged = { current, max -> updateZoomUi(current, max) }
@@ -176,7 +194,13 @@ class CameraFragment : Fragment(), EntryLockListener {
 
         binding.btnSettings.setOnClickListener { openSettings() }
         binding.txtCaptureSummary.setOnClickListener {
-            com.google.android.material.dialog.MaterialAlertDialogBuilder(requireContext()).setTitle("촬영 정보").setMessage(summaryText).setPositiveButton("확인",null).show()
+            if ((activity as? MainActivity)?.isEntryAuthenticated() != true) return@setOnClickListener
+            infoDialog?.dismiss()
+            infoDialog = com.google.android.material.dialog.MaterialAlertDialogBuilder(requireContext())
+                .setTitle("촬영 정보").setMessage(summaryText).setPositiveButton("확인",null).create().also { dialog ->
+                    dialog.setOnDismissListener { if (infoDialog === dialog) infoDialog = null }
+                    dialog.show()
+                }
         }
         binding.btnCaptureResult.setOnClickListener {
             navigateTo(RecordingHistoryFragment().apply { arguments = Bundle().apply { putString("sessionId",resultSession) } })
@@ -204,15 +228,15 @@ class CameraFragment : Fragment(), EntryLockListener {
 
     private fun handleShutterClick() {
         if (!::controller.isInitialized) return
-        if (controller.isRecording()) {
-            controller.stopRecording()
+        if ((activity as? MainActivity)?.isEntryAuthenticated() != true) return
+        if (RecordingRuntime.state.value?.active == true) {
+            service?.stopBackgroundRecording("app")
         } else {
             service?.startFromUi()
         }
     }
 
     private fun setVideoModeUi() {
-        binding.txtModeVideo.setTextColor(Color.parseColor("#FFC107"))
         binding.shutterCenter.setBackgroundResource(R.drawable.shutter_center_video)
         binding.txtTimer.visibility = View.VISIBLE
     }
@@ -224,7 +248,7 @@ class CameraFragment : Fragment(), EntryLockListener {
             return
         }
         val lensFacingLabel = if (controller.isFacingBack()) "후면" else "전면"
-        val zoomModeLabel = "%.2f× · 카메라 %s".format(controller.displayZoomRatio(), cameraId)
+        val zoomModeLabel = "%.2f×".format(controller.displayZoomRatio())
         binding.txtLensInfo.text = "$lensFacingLabel $zoomModeLabel"
     }
 
@@ -249,6 +273,8 @@ class CameraFragment : Fragment(), EntryLockListener {
             preset.button.setOnClickListener { controller.selectZoomPreset(preset.ratio) }
         }
         binding.sliderZoom.clearOnChangeListeners()
+        binding.sliderZoom.contentDescription = "확대 배율"
+        binding.sliderZoom.setLabelFormatter { "%.2f×".format(it) }
         binding.sliderZoom.addOnChangeListener { _, value, fromUser ->
             if (fromUser) controller.setDisplayZoomRatio(value)
         }
@@ -265,10 +291,16 @@ class CameraFragment : Fragment(), EntryLockListener {
         binding.sliderZoom.value = current.coerceIn(min, upper)
         binding.sliderZoom.visibility = if (max > min) View.VISIBLE else View.GONE
         zoomPresets.forEach { preset ->
-            preset.button.visibility = View.VISIBLE
-            preset.button.isEnabled = controller.supportsZoomPreset(preset.ratio)
-            preset.button.alpha = if (preset.button.isEnabled) 1f else 0.35f
-            preset.button.setTextColor(if (kotlin.math.abs(preset.ratio - current) < 0.08f) Color.parseColor("#FFC107") else Color.WHITE)
+            val supported = controller.supportsZoomPreset(preset.ratio)
+            val selected = kotlin.math.abs(preset.ratio - current) < 0.08f
+            preset.button.visibility = if (supported) View.VISIBLE else View.GONE
+            preset.button.isEnabled = supported
+            preset.button.isSelected = selected
+            preset.button.contentDescription = "%.1f배 확대".format(preset.ratio)
+            ViewCompat.setStateDescription(preset.button, if (selected) "선택됨" else null)
+            preset.button.strokeWidth = if (selected) (resources.displayMetrics.density * 2).toInt() else 0
+            preset.button.strokeColor = android.content.res.ColorStateList.valueOf(Color.parseColor("#FFC107"))
+            preset.button.setTextColor(if (selected) Color.parseColor("#FFC107") else Color.WHITE)
         }
         updateLensIndicator(controller.activeCameraId())
     }
@@ -313,16 +345,16 @@ class CameraFragment : Fragment(), EntryLockListener {
     private fun fitPreview() {
         val binding = _binding ?: return
         if (!::controller.isInitialized) return
-        val parent = binding.previewView.parent as? View ?: return
+        val parent = binding.previewArea
         if (parent.width <= 0 || parent.height <= 0) return
         val ratio = controller.previewFrameRatio()
-        val controlsWidth = binding.root.findViewById<View>(R.id.landscapeControls)?.width ?: 0
-        val width = minOf((parent.width - controlsWidth).coerceAtLeast(1), (parent.height * ratio).toInt())
+        val width = minOf(parent.width.coerceAtLeast(1), (parent.height * ratio).toInt())
         val height = (width / ratio).toInt()
         val params = binding.previewView.layoutParams
         if (params.width != width || params.height != height) {
             params.width = width; params.height = height
             binding.previewView.layoutParams = params
+            binding.gridOverlayView.layoutParams = binding.gridOverlayView.layoutParams.apply { this.width = width; this.height = height }
         }
     }
 
@@ -336,7 +368,8 @@ class CameraFragment : Fragment(), EntryLockListener {
         binding.btnGridToggle.setOnClickListener {
             val visible = binding.gridOverlayView.visibility == View.VISIBLE
             binding.gridOverlayView.visibility = if (visible) View.GONE else View.VISIBLE
-            binding.btnGridToggle.text = if (visible) "📐 격자 OFF" else "📐 격자 ON"
+            binding.btnGridToggle.text = if (visible) "격자 끔" else "격자 켬"
+            ViewCompat.setStateDescription(binding.btnGridToggle, if (visible) "꺼짐" else "켜짐")
             binding.btnGridToggle.setTextColor(if (visible) Color.WHITE else Color.parseColor("#FFC107"))
         }
 
@@ -345,42 +378,36 @@ class CameraFragment : Fragment(), EntryLockListener {
 
     private fun updateThumbnail() {
         val ctx = context ?: return
+        val viewBinding = _binding ?: return
+        thumbnailCancellation?.cancel()
+        thumbnailJob?.cancel()
+        val signal = CancellationSignal().also { thumbnailCancellation = it }
         val privateDir = File(ctx.getExternalFilesDir(null), "private_vault")
-        if (!privateDir.exists()) return
-
-        val files = privateDir.listFiles()?.filter { it.isFile && it.extension == "mp4" && it.length() > 0 && it.absolutePath !in com.example.camera2study.util.RecordingJournal.activePaths }
-        if (files.isNullOrEmpty()) {
-            binding.imgVaultThumbnail.setImageResource(android.R.drawable.ic_lock_lock)
-            binding.imgVaultThumbnail.setPadding(8, 8, 8, 8)
-            return
-        }
-
-        val latest = files.maxByOrNull { it.lastModified() } ?: return
-
-        try {
-            binding.imgVaultThumbnail.setPadding(0, 0, 0, 0)
-            if (latest.name.endsWith(".jpg")) {
-                val bitmap = BitmapFactory.decodeFile(latest.absolutePath)
-                binding.imgVaultThumbnail.setImageBitmap(bitmap)
-            } else if (latest.name.endsWith(".mp4")) {
-                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
-                    val bitmap = ThumbnailUtils.createVideoThumbnail(latest, Size(96, 96), CancellationSignal())
-                    binding.imgVaultThumbnail.setImageBitmap(bitmap)
-                } else {
-                    @Suppress("DEPRECATION")
-                    val bitmap = ThumbnailUtils.createVideoThumbnail(latest.absolutePath, MediaStore.Images.Thumbnails.MINI_KIND)
-                    binding.imgVaultThumbnail.setImageBitmap(bitmap)
-                }
+        thumbnailJob = viewLifecycleOwner.lifecycleScope.launch {
+            val bitmap = withContext(Dispatchers.IO) {
+                runCatching {
+                    val latest = privateDir.listFiles()?.filter {
+                        it.isFile && it.extension == "mp4" && it.length() > 0 &&
+                            it.absolutePath !in com.example.camera2study.util.RecordingJournal.activePaths
+                    }?.maxByOrNull { it.lastModified() } ?: return@runCatching null
+                    if (android.os.Build.VERSION.SDK_INT >= 29) ThumbnailUtils.createVideoThumbnail(latest, Size(96, 96), signal)
+                    else @Suppress("DEPRECATION") ThumbnailUtils.createVideoThumbnail(latest.absolutePath, MediaStore.Images.Thumbnails.MINI_KIND)
+                }.getOrNull()
             }
-        } catch (e: Exception) {
-            e.printStackTrace()
-            binding.imgVaultThumbnail.setImageResource(android.R.drawable.ic_lock_lock)
-            binding.imgVaultThumbnail.setPadding(8, 8, 8, 8)
+            if (_binding !== viewBinding || signal.isCanceled) return@launch
+            if (bitmap != null) {
+                viewBinding.imgVaultThumbnail.setPadding(0, 0, 0, 0)
+                viewBinding.imgVaultThumbnail.setImageBitmap(bitmap)
+            } else {
+                viewBinding.imgVaultThumbnail.setImageResource(android.R.drawable.ic_lock_lock)
+                viewBinding.imgVaultThumbnail.setPadding(8, 8, 8, 8)
+            }
         }
     }
 
     private fun openSettings() {
-        if (!::controller.isInitialized || controller.isRecording()) return
+        if (!::controller.isInitialized || RecordingRuntime.state.value?.active == true) return
+        if ((activity as? MainActivity)?.isEntryAuthenticated() != true) return
         saveCameraSettings()
         navigateTo(RecordingSettingsFragment.create(false))
     }
@@ -467,6 +494,7 @@ class CameraFragment : Fragment(), EntryLockListener {
         lastSummaryAt = now
         val free = (requireContext().getExternalFilesDir(null) ?: requireContext().filesDir).usableSpace
         val look = com.example.camera2study.util.VideoLook.presets.first { it.id == controller.videoLook.normalized().preset }.name
+        val profile = if (state.active && service?.currentSource != "app") "빠른 녹화" else "일반 촬영"
         val quality = when (controller.videoQuality) { Quality.UHD -> "4K"; Quality.FHD -> "1080p"; Quality.HD -> "720p"; else -> "SD" }
         val destination = if (controller.isPrivateSave) "비공개 보관함" else "공개 갤러리"
         val ending = if (controller.totalDurationMs > 0) "총 " + formatElapsed(controller.totalDurationMs)
@@ -483,8 +511,28 @@ class CameraFragment : Fragment(), EntryLockListener {
             (if (controller.audioEnabled) "마이크 켬" else "무음") + " · " + destination +
             "\n" + look + " · 파일당 " + formatElapsed(controller.maxDurationMs) + " · " + ending +
             (if (state.active) " · 현재 " + state.segment + "번째" else "") + remaining
+        if (!terminal) summaryText = profile + "\n" + summaryText
         summaryText += "\n여유 %.1f GiB".format(free / 1073741824.0) + estimate
-        binding.txtCaptureSummary.text = summaryText
+        summaryText += "\n렌즈 ID " + controller.activeCameraId().orEmpty() + " · 표시 배율 %.2f×".format(controller.displayZoomRatio())
+        binding.txtCaptureSummary.text = when {
+            terminal -> state.message + " · " + state.segment + "개 파일 · " + formatElapsed(state.durationMs)
+            state.active -> profile + " · " + quality + " · " + controller.targetFps + " FPS · " + (if (controller.audioEnabled) "마이크 켬" else "무음") +
+                "\n" + state.segment + "번째 파일 · " + ending
+            else -> quality + " · " + controller.targetFps + " FPS · " + (if (controller.audioEnabled) "마이크 켬" else "무음") + " · " + destination +
+                "\n" + look
+        }
+        binding.txtCaptureSummary.contentDescription = summaryText + ". 전체 촬영 정보 보기"
+    }
+
+    private fun phaseLabel(phase: RecordingPhase): String = when (phase) {
+        RecordingPhase.PREPARING -> "시작 준비"
+        RecordingPhase.RECORDING -> "녹화 중"
+        RecordingPhase.PAUSED -> "일시정지"
+        RecordingPhase.FINALIZING -> "저장 중"
+        RecordingPhase.BETWEEN_SEGMENTS -> "파일 전환"
+        RecordingPhase.COMPLETED -> "저장 완료"
+        RecordingPhase.ERROR -> "확인 필요"
+        RecordingPhase.IDLE -> "대기"
     }
 
     private fun formatElapsed(ms: Long): String {
@@ -502,7 +550,8 @@ class CameraFragment : Fragment(), EntryLockListener {
     }
 
     private fun saveCameraSettings() {
-        if (!::controller.isInitialized || _binding == null || controller.isRecording() || !controller.areControlsReady()) return
+        if (!::controller.isInitialized || _binding == null || RecordingRuntime.state.value?.active == true || !controller.areControlsReady()) return
+        if ((activity as? MainActivity)?.isEntryAuthenticated() != true) return
         val settings = CameraSettingsStore.snapshot(
             requireContext(),
             controller,
@@ -537,15 +586,20 @@ class CameraFragment : Fragment(), EntryLockListener {
     }
 
     override fun onEntryLocked() {
+        infoDialog?.dismiss()
         if (::controller.isInitialized) controller.detachPreview()
     }
 
     override fun onStop() {
+        infoDialog?.dismiss()
         if (::controller.isInitialized) controller.detachPreview()
         super.onStop()
     }
 
     override fun onDestroyView() {
+        infoDialog?.dismiss()
+        thumbnailCancellation?.cancel()
+        thumbnailJob?.cancel()
         handler.removeCallbacks(exposureFadeRunnable)
         binding.txtTimer.removeCallbacks(timerRunnable)
 
