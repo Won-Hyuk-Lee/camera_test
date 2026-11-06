@@ -230,6 +230,5 @@ class CameraForegroundService : LifecycleService() {
                 RecordingStopWidgetProvider.updateAll(context, RecordingState(RecordingPhase.ERROR, message = "중지 요청 실패 · 앱에서 확인"))
             }
         }
-        fun stop(context: Context) { context.stopService(Intent(context, CameraForegroundService::class.java)) }
     }
 }

@@ -628,9 +628,6 @@ class CameraFragment : Fragment(), EntryLockListener {
         handler.removeCallbacks(exposureFadeRunnable)
         binding.txtTimer.removeCallbacks(timerRunnable)
 
-        val ctx = context
-        val notRecording = !::controller.isInitialized || !controller.isRecording()
-
         if (::controller.isInitialized) {
             controller.onRecordingEvent = null
             controller.onCameraChanged = null
@@ -643,11 +640,6 @@ class CameraFragment : Fragment(), EntryLockListener {
         if (isBound) {
             requireContext().unbindService(serviceConnection)
             isBound = false
-        }
-
-        // 녹화 중이 아니면 foreground service가 절대 남지 않게 명시적으로 종료한다.
-        if (notRecording && ctx != null) {
-            CameraForegroundService.stop(ctx)
         }
 
         _binding = null
