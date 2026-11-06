@@ -15,6 +15,7 @@ import androidx.lifecycle.lifecycleScope
 import com.example.camera2study.R
 import com.example.camera2study.RecordingRuntime
 import com.example.camera2study.util.RecordingJournal
+import com.example.camera2study.util.VideoTrackInspector
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -22,6 +23,7 @@ import org.json.JSONArray
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.io.File
 
 class RecordingHistoryFragment : Fragment() {
     private var list: LinearLayout? = null
@@ -33,7 +35,17 @@ class RecordingHistoryFragment : Fragment() {
             lifecycleScope.launch {
                 val result = withContext(Dispatchers.IO) { runCatching {
                     checkNotNull(ctx.contentResolver.openOutputStream(uri)).use { output ->
-                        output.write(JSONArray(RecordingJournal.sessions(ctx)).toString(2).toByteArray(Charsets.UTF_8))
+                        val sessions = RecordingJournal.sessions(ctx)
+                        sessions.forEach { session ->
+                            val segments = session.getJSONArray("segments")
+                            for (index in 0 until segments.length()) {
+                                val item = segments.getJSONObject(index)
+                                item.optString("path").takeIf { it.isNotBlank() }?.let { path ->
+                                    VideoTrackInspector.load(ctx, File(path))?.let { item.put("manualVideoCheck", it.details()) }
+                                }
+                            }
+                        }
+                        output.write(JSONArray(sessions).toString(2).toByteArray(Charsets.UTF_8))
                     }
                 } }
                 Toast.makeText(ctx, if (result.isSuccess) "진단 기록을 저장했습니다" else "진단 저장 실패", Toast.LENGTH_LONG).show()
@@ -57,7 +69,30 @@ class RecordingHistoryFragment : Fragment() {
         val ctx = context ?: return
         val version = ++loadVersion
         viewLifecycleOwner.lifecycleScope.launch {
-            val sessions = withContext(Dispatchers.IO) { RecordingJournal.recover(ctx); RecordingJournal.sessions(ctx).filter { session -> arguments?.getString("sessionId")?.let { session.optString("id") == it } ?: true }.take(100) }
+            val selectedSession = arguments?.getString("sessionId")
+            val sessions = withContext(Dispatchers.IO) {
+                RecordingJournal.recover(ctx)
+                RecordingJournal.sessions(ctx, limit = 100, sessionId = selectedSession).onEach { session ->
+                    val files = session.getJSONArray("segments")
+                    for (index in 0 until files.length()) {
+                        val item = files.getJSONObject(index)
+                        val path = item.optString("path")
+                        val uri = item.optString("uri")
+                        val currentState = when {
+                            item.optString("status") == "RECORDING" -> "RECORDING"
+                            path.isNotBlank() -> if (File(path).isFile) "AVAILABLE" else "MISSING"
+                            uri.startsWith("content://") -> if (runCatching {
+                                ctx.contentResolver.openFileDescriptor(android.net.Uri.parse(uri), "r")?.use { true } == true
+                            }.getOrDefault(false)) "AVAILABLE" else "UNAVAILABLE"
+                            else -> "UNKNOWN"
+                        }
+                        item.put("currentFileState", currentState)
+                        if (path.isNotBlank() && currentState == "AVAILABLE") {
+                            VideoTrackInspector.load(ctx, File(path))?.let { item.put("manualCheckLabel", it.label) }
+                        }
+                    }
+                }
+            }
             if (version != loadVersion) return@launch
             val container = list ?: return@launch
             container.removeAllViews()
@@ -68,7 +103,8 @@ class RecordingHistoryFragment : Fragment() {
                 container.addView(TextView(ctx).apply { text = value; setTextColor(android.graphics.Color.WHITE); textSize = 15f; setPadding(0, 20, 0, 12) })
             }
             button("뒤로") { parentFragmentManager.popBackStack() }
-            text("촬영 결과 · 최근 100회")
+            text(if (selectedSession == null) "촬영 결과 · 최근 100회" else "선택한 촬영 결과")
+            text("저장 완료는 녹화 당시 저장 결과입니다. 영상·소리 내용까지 정상이라는 뜻은 아닙니다. 보관함에서 재생하거나 시간정보 검사를 실행하세요.")
             button("새로고침") { reload() }
             button("진단 기록 내보내기") { export.launch("recording-diagnostics.json") }
             if (sessions.isEmpty()) text("아직 촬영 기록이 없습니다")
@@ -86,26 +122,54 @@ class RecordingHistoryFragment : Fragment() {
                     bytes += file.optLong("bytes")
                     sizeKnown = sizeKnown && file.optBoolean("sizeKnown", false)
                     if (file.optString("status") == "COMPLETE") complete++
-                    details += "${i + 1}. ${status(file.optString("status"))} · ${file.optLong("durationMs") / 1000}초\n${file.optString("name")}"
+                    val current = when (file.optString("currentFileState")) {
+                        "AVAILABLE" -> if (file.optBoolean("fileUnavailable")) "원본 있음 · 영상 정보 확인 필요" else "원본 있음"
+                        "MISSING" -> "현재 원본 파일 없음"
+                        "UNAVAILABLE" -> "현재 원본 접근 불가 · 삭제 또는 권한 확인"
+                        "RECORDING" -> "기록 중"
+                        else -> "현재 파일 확인 필요"
+                    }
+                    val check = file.optString("manualCheckLabel").takeIf { it.isNotBlank() } ?: "시간정보 검사 전"
+                    details += "${i + 1}. 녹화 당시 ${status(file.optString("status"))} · ${file.optLong("durationMs") / 1000}초\n$current · $check\n${file.optString("name")}"
                 }
                 text("${formatter.format(Date(session.optLong("startedAt")))} · ${status(session.optString("status"))}\n" +
-                    "총 %02d:%02d · 완료 %d/%d개 · ".format(duration / 60_000, duration / 1000 % 60, complete, files.length()) +
+                    "총 %02d:%02d · 저장 완료 %d/%d개 · ".format(duration / 60_000, duration / 1000 % 60, complete, files.length()) +
                     (if (sizeKnown) "%.1f MiB".format(bytes / 1_048_576.0) else "용량 확인 필요") + "\n" +
                     "시작: ${sourceLabel(session.optString("source"))} · 종료: ${reasonLabel(session.optString("reason"))}\n" +
-                    session.optString("error") + "\n" + details.joinToString("\n"))
-                val privateFiles = (0 until files.length()).map { files.getJSONObject(it) }.filter { it.optString("path").isNotBlank() }
+                    audioSummary(session.optJSONObject("audioSummary")) + "\n" + session.optString("error") + "\n" + details.joinToString("\n\n"))
+                val privateFiles = (0 until files.length()).map { files.getJSONObject(it) }.filter { it.optString("path").isNotBlank() && it.optString("currentFileState") == "AVAILABLE" }
                 if (privateFiles.isNotEmpty()) button("이 촬영의 보관함 파일") {
                     val vault = PrivateVaultFragment().apply { arguments = Bundle().apply { putString("sessionId", session.getString("id")) } }
                     parentFragmentManager.beginTransaction().replace(R.id.container, vault).addToBackStack(null).commit()
                 }
                 for (i in 0 until files.length()) {
                     val file = files.getJSONObject(i)
-                    if (file.optString("path").isBlank() && file.optString("uri").startsWith("content://")) {
+                    if (file.optString("path").isBlank() && file.optString("uri").startsWith("content://") && file.optString("currentFileState") == "AVAILABLE") {
                         button((i + 1).toString() + ". 공개 저장 영상 열기") { openPublicVideo(file.optString("uri")) }
                     }
                 }
             }
         }
+    }
+    private fun audioSummary(audio: org.json.JSONObject?): String {
+        if (audio == null) return "소리 진단: 이전 버전 기록 없음"
+        if (!audio.optBoolean("enabled")) return "소리: 마이크 끔"
+        if (!audio.optBoolean("hadIssues")) return "소리: 녹음 오류 신호 없음 · 실제 소리 내용은 미검사"
+        val intervals = audio.optJSONArray("intervals") ?: JSONArray()
+        val details = (0 until minOf(intervals.length(), 4)).map { index ->
+            val item = intervals.getJSONObject(index)
+            val label = when (item.optString("state")) {
+                "SOURCE_SILENCED" -> "마이크 입력 무음 신호"
+                "SOURCE_ERROR" -> "마이크 입력 오류"
+                "ENCODER_ERROR" -> "음성 저장 오류"
+                "MUTED" -> "녹음 음소거"
+                else -> item.optString("state")
+            }
+            "%.1f–%.1f초 · %s".format(item.optLong("startMs") / 1000.0, item.optLong("endMs") / 1000.0, label)
+        }
+        return "소리 확인 필요 · ${audio.optInt("issueCount")}회 · 합계 %.1f초".format(audio.optLong("issueDurationMs") / 1000.0) +
+            (if (details.isEmpty()) "" else "\n" + details.joinToString("\n")) +
+            (if (intervals.length() > 4) "\n나머지 구간은 진단 기록 내보내기에서 확인하세요" else "")
     }
     private fun openPublicVideo(value: String) {
         val uri = android.net.Uri.parse(value)
