@@ -6,8 +6,10 @@ import org.junit.Test
 
 class VideoTimelineTest {
     @Test fun reorderedPresentationTimestampsDoNotCreateFalseGaps() {
-        val result = VideoTimeline.analyze(longArrayOf(0, 99_999, 33_333, 66_666, 133_332), 166_665, true)
+        val result = VideoTimeline.analyze(longArrayOf(0, 99_999, 33_333, 33_333, 66_666, 133_332), 166_665, true)
         assertEquals(33_333L, result.maxGapUs)
+        assertEquals(0L, result.maxGapStartUs)
+        assertEquals(33_333L, result.maxGapEndUs)
         assertFalse(result.needsReview)
     }
     @Test fun audioLengthBeyondLastVideoTimestampNeedsReview() {
@@ -25,8 +27,10 @@ class VideoTimelineTest {
         assertFalse(result.needsReview)
     }
     @Test fun internalVideoGapIsReportedEvenWhenTailReachesDuration() {
-        val result = VideoTimeline.analyze(longArrayOf(0, 33_333, 3_000_000, 3_033_333), 3_066_666, true)
-        assertTrue(result.maxGapUs > 2_000_000)
+        val result = VideoTimeline.analyze(longArrayOf(0, 33_333, 3_000_000, 3_000_000, 3_033_333), 3_066_666, true)
+        assertEquals(2_966_667L, result.maxGapUs)
+        assertEquals(33_333L, result.maxGapStartUs)
+        assertEquals(3_000_000L, result.maxGapEndUs)
         assertEquals(0L, result.missingTailUs)
         assertTrue(result.needsReview)
     }

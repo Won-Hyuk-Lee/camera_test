@@ -27,10 +27,19 @@ object VideoTrackInspector {
             append("\n영상 샘플: ").append(timeline.samples).append("개")
             append("\n첫/마지막 영상 시각: %.2f / %.2f초".format(timeline.firstUs / 1_000_000.0, timeline.lastUs / 1_000_000.0))
             append("\n가장 긴 영상 간격: %.3f초".format(timeline.maxGapUs / 1_000_000.0))
+            if (timeline.maxGapStartUs != null && timeline.maxGapEndUs != null) {
+                append("\n간격 위치: ").append(playbackPosition(timeline.maxGapStartUs))
+                    .append(" ~ ").append(playbackPosition(timeline.maxGapEndUs))
+            } else if (timeline.maxGapUs > 0) {
+                append("\n간격 위치는 다시 검사하면 확인할 수 있습니다.")
+            }
             if (timeline.complete) append("\n영상 끝 이후 남은 길이: %.2f초".format(timeline.missingTailUs / 1_000_000.0))
             append("\n음성 트랙: ").append(if (audioTrack) "있음 · 소리 내용은 미검사" else "없음")
             append("\n\n시간정보만 확인합니다. 화면이 같은 장면인지, 영상 디코딩이나 소리가 정상인지는 판정하지 않습니다. 긴 간격이 있으면 해당 위치를 직접 재생해 확인하세요.")
         }
+
+        private fun playbackPosition(us: Long) = "%02d:%02d.%03d".format(java.util.Locale.ROOT,
+            us / 60_000_000, us / 1_000_000 % 60, us / 1_000 % 1000)
     }
 
     fun inspect(file: File, canceled: () -> Boolean = { false }, progress: (Int) -> Unit = {}): Report {
@@ -84,6 +93,7 @@ object VideoTrackInspector {
             .put("durationMs", report.durationMs).put("audioTrack", report.audioTrack).put("stopReason", report.stopReason)
             .put("samples", report.timeline.samples).put("firstUs", report.timeline.firstUs).put("lastUs", report.timeline.lastUs)
             .put("maxGapUs", report.timeline.maxGapUs).put("missingTailUs", report.timeline.missingTailUs).put("complete", report.timeline.complete)
+            .putOpt("maxGapStartUs", report.timeline.maxGapStartUs).putOpt("maxGapEndUs", report.timeline.maxGapEndUs)
         val atomic = AtomicFile(resultFile(context, file))
         val stream = atomic.startWrite()
         try { stream.write(data.toString().toByteArray()); atomic.finishWrite(stream) }
@@ -95,7 +105,9 @@ object VideoTrackInspector {
         if (j.getLong("size") != file.length() || j.getLong("modified") != file.lastModified()) return null
         Report(j.getLong("checkedAt"), j.getLong("size"), j.getLong("modified"), j.getLong("durationMs"),
             VideoTimeline(j.getInt("samples"), j.getLong("firstUs"), j.getLong("lastUs"), j.getLong("maxGapUs"),
-                j.getLong("missingTailUs"), j.getBoolean("complete")), j.getBoolean("audioTrack"), j.optString("stopReason"))
+                j.getLong("missingTailUs"), j.getBoolean("complete"),
+                j.optLong("maxGapStartUs", -1L).takeIf { it >= 0 }, j.optLong("maxGapEndUs", -1L).takeIf { it >= 0 }),
+            j.getBoolean("audioTrack"), j.optString("stopReason"))
     }.getOrNull()
 
     fun remove(context: Context, file: File) { AtomicFile(resultFile(context, file)).delete() }

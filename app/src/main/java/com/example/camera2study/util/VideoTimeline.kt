@@ -7,7 +7,9 @@ data class VideoTimeline(
     val lastUs: Long,
     val maxGapUs: Long,
     val missingTailUs: Long,
-    val complete: Boolean
+    val complete: Boolean,
+    val maxGapStartUs: Long? = null,
+    val maxGapEndUs: Long? = null
 ) {
     val needsReview: Boolean get() = samples == 0 || maxGapUs > 500_000L ||
         (complete && (firstUs > 1_000_000L || missingTailUs > 1_000_000L))
@@ -18,15 +20,21 @@ data class VideoTimeline(
             // B-frame streams can be extracted in decode order; compare presentation order.
             val sorted = timestamps.sortedArray()
             var largest = 0L
+            var largestStart: Long? = null
+            var largestEnd: Long? = null
             var smallest = Long.MAX_VALUE
             for (index in 1 until sorted.size) {
                 val gap = sorted[index] - sorted[index - 1]
-                if (gap > largest) largest = gap
+                if (gap > largest) {
+                    largest = gap
+                    largestStart = sorted[index - 1]
+                    largestEnd = sorted[index]
+                }
                 if (gap > 0 && gap < smallest) smallest = gap
             }
             val finalFrameUs = if (smallest == Long.MAX_VALUE) 0L else smallest
             val missingTail = if (complete) (expectedDurationUs - sorted.last() - finalFrameUs).coerceAtLeast(0) else 0L
-            return VideoTimeline(sorted.size, sorted.first(), sorted.last(), largest, missingTail, complete)
+            return VideoTimeline(sorted.size, sorted.first(), sorted.last(), largest, missingTail, complete, largestStart, largestEnd)
         }
     }
 }
