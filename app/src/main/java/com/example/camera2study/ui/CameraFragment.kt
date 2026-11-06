@@ -53,8 +53,6 @@ class CameraFragment : Fragment(), EntryLockListener {
     private var manualColorTempK: Int = CameraSettingsStore.DEFAULT_COLOR_TEMP_K
 
 
-    private var recordStartMs: Long = 0L
-    private var pauseStartMs: Long = 0L
     private var lastSummaryAt = 0L
     private var summaryText = ""
     private var resultSession = ""
@@ -62,15 +60,6 @@ class CameraFragment : Fragment(), EntryLockListener {
     private var infoDialog: androidx.appcompat.app.AlertDialog? = null
     private var thumbnailJob: Job? = null
     private var thumbnailCancellation: CancellationSignal? = null
-    private val timerRunnable = object : Runnable {
-        override fun run() {
-            val binding = _binding ?: return
-            if (!::controller.isInitialized) return
-            val elapsed = controller.recordingState.durationMs
-            binding.txtTimer.text = formatElapsed(elapsed) + " · " + phaseLabel(controller.recordingState.phase)
-            binding.txtTimer.postDelayed(this, 200L)
-        }
-    }
 
     private val serviceConnection = object : android.content.ServiceConnection {
         override fun onServiceConnected(name: android.content.ComponentName?, binder: android.os.IBinder?) {
@@ -106,6 +95,8 @@ class CameraFragment : Fragment(), EntryLockListener {
                     binding.btnRecord.isEnabled = state.active || controller.areControlsReady()
                     if (lastUiPhase != state.phase) {
                         lastUiPhase = state.phase
+                        val shutterScale = if (state.active) 0.6f else 1f
+                        binding.shutterCenter.animate().scaleX(shutterScale).scaleY(shutterScale).setDuration(150).start()
                         updateControlAccess()
                         updateZoomUi(controller.displayZoomRatio(), controller.getMaxZoomRatio())
                     }
@@ -142,13 +133,7 @@ class CameraFragment : Fragment(), EntryLockListener {
                 arguments?.putBoolean("EXTRA_AUTO_START", false)
                 service?.startFromUi()
             } else {
-                // 서비스의 동영상 상태 복원
-                if (controller.isRecording()) {
-                    setVideoModeUi()
-                    syncRecordingUi(true)
-                } else {
-                    setVideoModeUi()
-                }
+                setVideoModeUi()
             }
 
         }
@@ -437,79 +422,13 @@ class CameraFragment : Fragment(), EntryLockListener {
         navigateTo(RecordingSettingsFragment.create(false))
     }
 
-    private fun syncRecordingUi(isRecording: Boolean) {
-        val binding = _binding ?: return
-        if (isRecording) {
-            binding.txtTimer.removeCallbacks(timerRunnable)
-            binding.txtTimer.post(timerRunnable)
-            binding.btnPauseResume.visibility = View.VISIBLE
-            binding.btnPauseResume.text = if (controller.isPaused()) "▶ 재개" else "⏸ 일시정지"
-
-            val animation = ScaleAnimation(
-                1.0f, 0.6f, 1.0f, 0.6f,
-                ScaleAnimation.RELATIVE_TO_SELF, 0.5f,
-                ScaleAnimation.RELATIVE_TO_SELF, 0.5f
-            ).apply {
-                duration = 200
-                fillAfter = true
-            }
-            binding.shutterCenter.startAnimation(animation)
-        } else {
-            binding.txtTimer.removeCallbacks(timerRunnable)
-            binding.txtTimer.text = formatElapsed(controller.recordingState.durationMs) + " · " + controller.recordingState.message
-            binding.btnPauseResume.visibility = View.GONE
-            binding.shutterCenter.clearAnimation()
-
-            val animation = ScaleAnimation(
-                0.6f, 1.0f, 0.6f, 1.0f,
-                ScaleAnimation.RELATIVE_TO_SELF, 0.5f,
-                ScaleAnimation.RELATIVE_TO_SELF, 0.5f
-            ).apply {
-                duration = 200
-                fillAfter = true
-            }
-            binding.shutterCenter.startAnimation(animation)
-        }
-    }
-
     private fun handleRecordEvent(event: VideoRecordEvent) {
-        val binding = _binding ?: return
-        when (event) {
-            is VideoRecordEvent.Start -> {
-                syncRecordingUi(true)
-            }
-            is VideoRecordEvent.Pause -> {
-                pauseStartMs = SystemClock.elapsedRealtime()
-                binding.txtTimer.removeCallbacks(timerRunnable)
-                binding.btnPauseResume.text = "▶ 재개"
-            }
-            is VideoRecordEvent.Resume -> {
-                // pause 구간만큼 recordStartMs를 앞으로 당겨 타이머에 포함시키지 않는다.
-                val pausedDuration = SystemClock.elapsedRealtime() - pauseStartMs
-                recordStartMs += pausedDuration
-                binding.txtTimer.post(timerRunnable)
-                binding.btnPauseResume.text = if (controller.isPaused()) "▶ 재개" else "⏸ 일시정지"
-            }
-            is VideoRecordEvent.Finalize -> {
-                if (!controller.isRecording()) {
-                    service?.restoreNormalProfile()
-                    syncRecordingUi(false)
-                } else {
-                    recordStartMs = SystemClock.elapsedRealtime()
-                }
-
-                // 완료 Toast는 띄우지 않는다. 오류 발생 시에만 사용자에게 노출한다.
-                if (event.hasError()) {
-                    Toast.makeText(
-                        requireContext(),
-                        "녹화 오류: ${event.error}",
-                        Toast.LENGTH_LONG
-                    ).show()
-                }
-                updateThumbnail()
-            }
-            else -> Unit
+        if (_binding == null || event !is VideoRecordEvent.Finalize) return
+        if (!controller.isRecording()) service?.restoreNormalProfile()
+        if (event.hasError() && controller.recordingState.phase == RecordingPhase.ERROR) {
+            Toast.makeText(requireContext(), controller.recordingState.message, Toast.LENGTH_LONG).show()
         }
+        updateThumbnail()
     }
 
     private fun updateCaptureSummary(state: com.example.camera2study.RecordingState, force: Boolean = false) {
@@ -626,7 +545,7 @@ class CameraFragment : Fragment(), EntryLockListener {
         thumbnailCancellation?.cancel()
         thumbnailJob?.cancel()
         handler.removeCallbacks(exposureFadeRunnable)
-        binding.txtTimer.removeCallbacks(timerRunnable)
+        binding.shutterCenter.animate().cancel()
 
         if (::controller.isInitialized) {
             controller.onRecordingEvent = null
