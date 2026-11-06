@@ -26,7 +26,7 @@ object VideoFiles {
         finally { retriever.release() }
     }
 
-    fun exportCopy(context: Context, file: File, created: (android.net.Uri) -> Unit = {}, progress: (Long, Long, Boolean) -> Unit = { _, _, _ -> }, canceled: () -> Boolean = { false },
+    fun exportCopy(context: Context, file: File, created: (android.net.Uri) -> Unit, progress: (Long, Long, Boolean) -> Unit = { _, _, _ -> }, canceled: () -> Boolean = { false },
                    commitPublication: (android.net.Uri, () -> Unit) -> Unit = { _, publish -> publish() }): android.net.Uri {
         check(file.absolutePath !in RecordingJournal.activePaths) { "기록 중인 파일입니다" }
         check(inspect(file).playable) { "재생 가능한 완료 파일만 내보낼 수 있습니다" }
@@ -41,8 +41,10 @@ object VideoFiles {
         }
         val collection = if (image) MediaStore.Images.Media.EXTERNAL_CONTENT_URI else MediaStore.Video.Media.EXTERNAL_CONTENT_URI
         val uri = checkNotNull(resolver.insert(collection, values)) { "갤러리 항목 생성 실패" }
+        var recordedInQueue = false
         try {
             created(uri)
+            recordedInQueue = true
             val expected = file.length()
             val copied = file.inputStream().use { input ->
                 checkNotNull(resolver.openOutputStream(uri, "w")) { "갤러리 쓰기 실패" }.use { output ->
@@ -67,7 +69,8 @@ object VideoFiles {
                 check(resolver.update(uri, ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING, 0) }, null, null) == 1)
             }
         } catch (e: Exception) {
-            runCatching { resolver.delete(uri, null, null) }
+            // Once the URI is durable, the cancellation worker owns its cleanup and retries.
+            if (!recordedInQueue || !canceled()) runCatching { resolver.delete(uri, null, null) }
             throw e
         }
         // Export is a copy. The source always remains in the vault.

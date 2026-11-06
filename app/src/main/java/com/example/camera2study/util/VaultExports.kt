@@ -172,10 +172,41 @@ object VaultExports {
     private fun deleteOutput(value: String) {
         val resolver = context!!.contentResolver
         val uri = Uri.parse(value)
-        if (resolver.delete(uri, null, null) == 0) {
-            val exists = resolver.query(uri, arrayOf(MediaStore.MediaColumns._ID), null, null, null)?.use { it.moveToFirst() } == true
-            check(!exists) { "내보내기 항목을 삭제할 수 없습니다" }
+        if (!outputExists(resolver, uri)) return
+        try {
+            if (resolver.delete(uri, null, null) > 0) return
+        } catch (denied: SecurityException) {
+            // Another cleanup may have removed the row after our query. A denied collection
+            // query (or a row that is still present) must remain a retryable cleanup failure.
+            if (outputExists(resolver, uri)) throw denied
+            return
         }
+        check(!outputExists(resolver, uri)) { "내보내기 항목을 삭제할 수 없습니다" }
+    }
+
+    private fun outputExists(resolver: android.content.ContentResolver, uri: Uri): Boolean {
+        val collection = uri.buildUpon().path(uri.path?.substringBeforeLast('/')).clearQuery().fragment(null).build()
+        val volume = uri.pathSegments.firstOrNull() ?: error("내보내기 저장소 이름이 없습니다")
+        check(collection == MediaStore.Video.Media.getContentUri(volume) || collection == MediaStore.Images.Media.getContentUri(volume)) {
+            "알 수 없는 내보내기 저장 위치입니다"
+        }
+        val projection = arrayOf(MediaStore.MediaColumns._ID)
+        val selection = "${MediaStore.MediaColumns._ID} = ?"
+        val ids = arrayOf(android.content.ContentUris.parseId(uri).toString())
+        val cursor = if (android.os.Build.VERSION.SDK_INT >= 30) {
+            val query = android.os.Bundle().apply {
+                putString(android.content.ContentResolver.QUERY_ARG_SQL_SELECTION, selection)
+                putStringArray(android.content.ContentResolver.QUERY_ARG_SQL_SELECTION_ARGS, ids)
+                putInt(MediaStore.QUERY_ARG_MATCH_PENDING, MediaStore.MATCH_INCLUDE)
+                putInt(MediaStore.QUERY_ARG_MATCH_TRASHED, MediaStore.MATCH_INCLUDE)
+            }
+            resolver.query(collection, projection, query, null)
+        } else {
+            check(android.os.Build.VERSION.SDK_INT >= 29) { "Android 10 이상에서 내보내기 항목을 정리할 수 있습니다" }
+            @Suppress("DEPRECATION")
+            resolver.query(MediaStore.setIncludePending(collection), projection, selection, ids, null)
+        }
+        return checkNotNull(cursor) { "내보내기 항목 존재 여부를 확인할 수 없습니다" }.use { it.moveToFirst() }
     }
 
     private fun published(job: Job): Boolean = runCatching {
