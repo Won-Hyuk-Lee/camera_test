@@ -323,6 +323,7 @@ class CameraController(private val context: Context) {
         if (owned.isNotEmpty()) cameraProvider?.unbind(*owned.toTypedArray())
     }
 
+    @androidx.annotation.OptIn(androidx.camera.core.ExperimentalMirrorMode::class)
     private fun bindUseCases(): Boolean {
         val provider = cameraProvider ?: return false
         val owner = lifecycleOwner ?: return false
