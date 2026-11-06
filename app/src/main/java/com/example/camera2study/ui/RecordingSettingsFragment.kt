@@ -1,6 +1,8 @@
 package com.example.camera2study.ui
 
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
@@ -13,16 +15,19 @@ import androidx.camera.core.DynamicRange
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.video.Quality
 import androidx.camera.video.Recorder
+import androidx.camera.view.PreviewView
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.Fragment
 import com.example.camera2study.CameraForegroundService
 import com.example.camera2study.EntryLockListener
 import com.example.camera2study.MainActivity
+import com.example.camera2study.RecordingRuntime
 import com.example.camera2study.R
 import com.example.camera2study.util.VideoLook
 import com.example.camera2study.util.CameraSettingsStore
 import com.example.camera2study.util.CameraSettingsStore.CameraSettings
 import com.example.camera2study.util.VideoConfigurationSupport
+import com.example.camera2study.util.SettingsPreviewSession
 
 @androidx.annotation.OptIn(ExperimentalCamera2Interop::class)
 class RecordingSettingsFragment : Fragment(), EntryLockListener {
@@ -35,7 +40,7 @@ class RecordingSettingsFragment : Fragment(), EntryLockListener {
     private var testButton: Button? = null
     private var settingsScroll: ScrollView? = null
     private var draft = CameraSettings()
-        set(value) { field = value; updateSavedStatus() }
+        set(value) { field = value; updateSavedStatus(); schedulePreview() }
     private fun hasUnsavedChanges() = draft != baseline || draft.lensFacingBack != savedFacingBack
     private fun updateSavedStatus() {
         statusLabel?.text = if (hasUnsavedChanges()) "미저장 변경 · 저장 후 다음 촬영에 적용" else "저장된 설정"
@@ -46,6 +51,13 @@ class RecordingSettingsFragment : Fragment(), EntryLockListener {
     private var ready = false
     private var details = false
     private var manualExpanded = false
+    private var previewView: PreviewView? = null
+    private var previewStatus: TextView? = null
+    private var compareOriginal: CheckBox? = null
+    private var originalPreview = false
+    private var previewSession: SettingsPreviewSession? = null
+    private val previewHandler = Handler(Looper.getMainLooper())
+    private val previewUpdate = Runnable { updatePreview() }
     private val dialogs = mutableSetOf<android.app.Dialog>()
     private fun authenticated() = (activity as? MainActivity)?.isEntryAuthenticated() == true
     private fun showDialog(builder: com.google.android.material.dialog.MaterialAlertDialogBuilder) {
@@ -55,7 +67,11 @@ class RecordingSettingsFragment : Fragment(), EntryLockListener {
         dialog.setOnDismissListener { dialogs.remove(dialog) }
         dialog.show()
     }
-    override fun onEntryLocked() { dialogs.toList().forEach { it.dismiss() } }
+    override fun onEntryLocked() {
+        dialogs.toList().forEach { it.dismiss() }
+        stopPreview()
+    }
+    override fun onEntryUnlocked() { schedulePreview() }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -94,7 +110,36 @@ class RecordingSettingsFragment : Fragment(), EntryLockListener {
         }
         list = content
         settingsScroll = ScrollView(ctx).apply { isFillViewport = true; addView(content) }
-        root.addView(settingsScroll, LinearLayout.LayoutParams(-1, 0, 1f))
+        val landscape = resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
+        val body = LinearLayout(ctx).apply { orientation = if (landscape) LinearLayout.HORIZONTAL else LinearLayout.VERTICAL }
+        root.addView(body, LinearLayout.LayoutParams(-1, 0, 1f))
+        val previewColumn = LinearLayout(ctx).apply {
+            orientation = LinearLayout.VERTICAL
+            if (landscape) setPadding(0, 0, dp(12), 0)
+        }
+        body.addView(previewColumn, if (landscape) LinearLayout.LayoutParams(0, -1, 1f) else LinearLayout.LayoutParams(-1, -2))
+        previewView = PreviewView(ctx).apply {
+            implementationMode = PreviewView.ImplementationMode.COMPATIBLE
+            scaleType = PreviewView.ScaleType.FIT_CENTER
+            setBackgroundColor(android.graphics.Color.BLACK)
+            contentDescription = "저장 전 촬영 설정 미리보기"
+        }
+        previewColumn.addView(previewView, if (landscape) LinearLayout.LayoutParams(-1, 0, 1f) else LinearLayout.LayoutParams(-1, dp(150)))
+        previewStatus = TextView(ctx).apply {
+            textSize = 12f; setTextColor(android.graphics.Color.LTGRAY)
+            maxLines = 2; ellipsize = android.text.TextUtils.TruncateAt.END
+            text = "저장 전 미리보기 · 설정은 저장 버튼으로 적용"
+        }
+        previewColumn.addView(previewStatus)
+        compareOriginal = CheckBox(ctx).apply {
+            text = "원본과 비교 · 저장할 필터는 유지"; textSize = 13f; setTextColor(android.graphics.Color.WHITE)
+            minimumHeight = dp(48)
+            setOnCheckedChangeListener { _, checked ->
+                if (authenticated()) { originalPreview = checked; schedulePreview() }
+            }
+        }
+        previewColumn.addView(compareOriginal)
+        body.addView(settingsScroll, if (landscape) LinearLayout.LayoutParams(0, -1, 1.25f) else LinearLayout.LayoutParams(-1, 0, 1f))
         val footer = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL; setPadding(0, dp(8), 0, 0) }
         fun action(text: String, click: () -> Unit) = Button(ctx).apply {
             this.text = text; textSize = 14f; minimumHeight = dp(56)
@@ -105,6 +150,7 @@ class RecordingSettingsFragment : Fragment(), EntryLockListener {
         saveButton = action("설정 저장") { if (saveDraft()) toast("설정을 저장했습니다. 다음 촬영부터 적용됩니다") }
         if (quick) testButton = action("10초 시험") {
             if (saveDraft()) {
+                stopPreview()
                 CameraForegroundService.requestQuickRecording(requireContext(), test = true)
                 toast("저장한 설정으로 10초 시험 촬영을 요청했습니다")
             }
@@ -116,6 +162,13 @@ class RecordingSettingsFragment : Fragment(), EntryLockListener {
 
     override fun onViewCreated(view: View, state: Bundle?) {
         render()
+        RecordingRuntime.state.observe(viewLifecycleOwner) { stateValue ->
+            if (stateValue.active) {
+                stopPreview()
+                previewStatus?.text = "녹화 중에는 미리보기를 중단합니다. 저장한 설정은 다음 촬영부터 적용됩니다."
+            } else schedulePreview()
+            refreshActions()
+        }
         val future = ProcessCameraProvider.getInstance(requireContext())
         future.addListener({
             if (list == null) return@addListener
@@ -268,6 +321,7 @@ class RecordingSettingsFragment : Fragment(), EntryLockListener {
                 .setNegativeButton("취소", null))
         }
         refreshActions()
+        schedulePreview()
         scroll?.post { if (list === container) scroll.scrollTo(0, scrollY) }
     }
 
@@ -279,7 +333,13 @@ class RecordingSettingsFragment : Fragment(), EntryLockListener {
     private fun refreshActions() {
         val valid = ready && configurationProblem() == null
         saveButton?.isEnabled = valid
-        testButton?.isEnabled = valid && com.example.camera2study.RecordingRuntime.state.value?.active != true
+        val active = RecordingRuntime.state.value?.active == true
+        testButton?.isEnabled = valid && !active
+        compareOriginal?.isEnabled = valid && !active && !draft.hdrEnabled && !draft.look.isIdentity()
+        if (compareOriginal?.isEnabled != true) {
+            originalPreview = false
+            compareOriginal?.isChecked = false
+        }
     }
 
     private fun saveDraft(): Boolean {
@@ -332,7 +392,7 @@ class RecordingSettingsFragment : Fragment(), EntryLockListener {
         }
         bar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onStartTrackingTouch(seekBar: SeekBar?) = Unit
-            override fun onStopTrackingTouch(seekBar: SeekBar?) = Unit
+            override fun onStopTrackingTouch(seekBar: SeekBar?) { render() }
             override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
                 if (fromUser && authenticated()) { val v = progress - if (signed) 100 else 0; change(v / 100f); caption.text = title + " · " + v }
             }
@@ -377,10 +437,40 @@ class RecordingSettingsFragment : Fragment(), EntryLockListener {
 
     private fun toast(text: String) { context?.let { Toast.makeText(it, text, Toast.LENGTH_LONG).show() } }
     private fun qualityName(quality: Quality): String = when (quality) { Quality.UHD -> "UHD · 4K"; Quality.FHD -> "FHD · 1080p"; Quality.HD -> "HD · 720p"; else -> "SD" }
+    private fun schedulePreview() {
+        if (previewView == null) return
+        previewHandler.removeCallbacks(previewUpdate)
+        previewHandler.postDelayed(previewUpdate, 180)
+    }
+    private fun updatePreview() {
+        val preview = previewView ?: return
+        if (!authenticated() || !isResumed || !preview.isShown || RecordingRuntime.state.value?.active == true) {
+            stopPreview()
+            return
+        }
+        configurationProblem()?.let { problem ->
+            stopPreview()
+            previewStatus?.text = problem
+            return
+        }
+        val session = previewSession ?: SettingsPreviewSession(requireContext(), viewLifecycleOwner, preview) { message ->
+            previewStatus?.text = message + if (originalPreview) " · 원본 보기" else ""
+        }.also { previewSession = it }
+        session.show(draft, originalPreview)
+        refreshActions()
+    }
+    private fun stopPreview() {
+        previewHandler.removeCallbacks(previewUpdate)
+        previewSession?.close()
+        previewSession = null
+    }
+    override fun onResume() { super.onResume(); schedulePreview() }
+    override fun onPause() { stopPreview(); super.onPause() }
     override fun onStop() { onEntryLocked(); super.onStop() }
     override fun onDestroyView() {
         onEntryLocked(); list = null; statusLabel = null; scopeLabel = null
         saveButton = null; testButton = null; settingsScroll = null
+        previewView = null; previewStatus = null; compareOriginal = null; originalPreview = false
         super.onDestroyView()
     }
     companion object { fun create(quick: Boolean) = RecordingSettingsFragment().apply { arguments = Bundle().apply { putBoolean("quick", quick) } } }
