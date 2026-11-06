@@ -87,10 +87,14 @@ class CameraController(private val context: Context) {
             released -> completePreparation("카메라가 닫혔습니다")
             preparationError != null -> completePreparation(preparationError)
             areControlsReady() -> completePreparation(null)
+            previewView == null && previewWasDetached -> previewUseCase?.let(::providePreparationPreview)
         }
     }
 
-    fun cancelPendingPreparation() { preparationCallback = null }
+    fun cancelPendingPreparation() {
+        preparationCallback = null
+        endPreparationPreview()
+    }
 
     private fun completePreparation(error: String?) {
         val callback = preparationCallback ?: return
@@ -155,6 +159,9 @@ class CameraController(private val context: Context) {
 
     private var lifecycleOwner: LifecycleOwner? = null
     private var previewView: PreviewView? = null
+    private var previewWasDetached = false
+    private class PreparationPreview(val useCase: Preview)
+    private var preparationPreview: PreparationPreview? = null
 
     private var lensFacing: Int = CameraSelector.LENS_FACING_BACK
     private var pendingZoomAfterBind: Float? = null
@@ -297,6 +304,9 @@ class CameraController(private val context: Context) {
 
     fun attachPreview(view: PreviewView) {
         if (released || previewView === view) return
+        // Replacing a provider cancels its SurfaceRequest; only its own result listener frees it.
+        preparationPreview = null
+        previewWasDetached = false
         previewView = view
         previewUseCase?.setSurfaceProvider(view.surfaceProvider)
         recordDiagnostic("preview_attached")
@@ -304,9 +314,47 @@ class CameraController(private val context: Context) {
     fun detachPreview() {
         if (previewView == null) return
         previewView = null
-        // Keep the use-case group and video crop stable while the screen is closed.
-        previewUseCase?.setSurfaceProvider(null)
+        previewWasDetached = true
+        val starting = preparationCallback != null || (isRecording() && currentRepeatCount == 0 &&
+            recordingState.phase == RecordingPhase.PREPARING && segmentDurationMs == 0L)
+        val preview = previewUseCase
+        if (starting && !released && preview != null) providePreparationPreview(preview)
+        else preview?.setSurfaceProvider(null)
         recordDiagnostic("preview_detached")
+    }
+
+    /** Keep a pending repeating request alive if the UI disappears before its controls are acknowledged. */
+    private fun providePreparationPreview(preview: Preview) {
+        if (preparationPreview?.useCase === preview || previewView != null || released) return
+        val owner = PreparationPreview(preview)
+        preparationPreview = owner
+        val executor = ContextCompat.getMainExecutor(context)
+        preview.setSurfaceProvider(executor) { request ->
+            if (released || preparationPreview !== owner) {
+                request.willNotProvideSurface()
+            } else {
+                com.example.camera2study.util.PreparationSurface.provide(request, mainHandler, executor) { error ->
+                    if (preparationPreview === owner && !released) {
+                        val message = "화면 전환 중 카메라 준비 실패: ${error.message}"
+                        if (isRecording()) {
+                            failure = message
+                            reportError(message)
+                            stopRecording("preparation_surface_error")
+                        } else failPreparation(message)
+                    }
+                }
+            }
+        }
+    }
+
+    private fun endPreparationPreview() {
+        val owner = preparationPreview ?: return
+        preparationPreview = null
+        if (previewView == null && owner.useCase === previewUseCase) {
+            // Inactivate Preview only. Keep the bound video use case and encoder intact.
+            owner.useCase.setSurfaceProvider(null)
+            recordDiagnostic("preparation_preview_detached")
+        }
     }
 
     fun reportError(message: String) {
@@ -317,6 +365,7 @@ class CameraController(private val context: Context) {
     }
 
     private fun unbindOwnedUseCases() {
+        if (preparationPreview?.useCase === previewUseCase) preparationPreview = null
         observedCameraInfo?.cameraState?.removeObserver(cameraStateObserver)
         observedCameraInfo = null
         val owned = listOfNotNull(previewUseCase, videoCapture)
@@ -355,7 +404,9 @@ class CameraController(private val context: Context) {
                 .setResolutionSelector(ResolutionSelector.Builder().setAspectRatioStrategy(AspectRatioStrategy.RATIO_16_9_FALLBACK_AUTO_STRATEGY).build())
                 .setMirrorMode(if (mirrorFront) androidx.camera.core.MirrorMode.MIRROR_MODE_ON_FRONT_ONLY else androidx.camera.core.MirrorMode.MIRROR_MODE_OFF)
                 .setDynamicRange(dynamicRange).build()
-            previewView?.let { preview.setSurfaceProvider(it.surfaceProvider) }
+            val visiblePreview = previewView
+            if (visiblePreview != null) preview.setSurfaceProvider(visiblePreview.surfaceProvider)
+            else if (preparationCallback != null && previewWasDetached) providePreparationPreview(preview)
             val rotation = outputRotation()
             val ratio = if (rotation == android.view.Surface.ROTATION_0 || rotation == android.view.Surface.ROTATION_180) android.util.Rational(9, 16) else android.util.Rational(16, 9)
             val group = androidx.camera.core.UseCaseGroup.Builder()
@@ -868,6 +919,7 @@ class CameraController(private val context: Context) {
         recordDiagnostic("configuration_ready", org.json.JSONObject().put("cameraId", activeCameraId())
             .put("zoom", zoomRatio).put("exposureEv", exposureEv).put("fps", targetFps)
             .put("previewAttached", previewView != null).put("cameraState", lastCameraState.orEmpty())
+            .put("preparationPreview", preparationPreview != null)
             .put("effect", usesVideoEffect()))
         sessionPlan = RecordingPlan(maxDurationMs.coerceAtLeast(1_000L), maxRepeatCount.coerceAtLeast(0), totalDurationMs.coerceAtLeast(0))
         val problem = com.example.camera2study.util.CaptureHealth.problem(context, audioEnabled, true)
@@ -945,6 +997,7 @@ class CameraController(private val context: Context) {
                     is VideoRecordEvent.Status -> {
                         if (!stopRequested && !isAutoStopping && !isRecordingPaused && segmentBytes > 0 && segmentDurationMs > 0) {
                             publish(RecordingPhase.RECORDING, "녹화 중")
+                            endPreparationPreview()
                         }
                         val now = android.os.SystemClock.elapsedRealtime()
                         if (now - lastJournalAt > 5_000L) {
@@ -1012,6 +1065,7 @@ class CameraController(private val context: Context) {
 
     private fun finishSession() {
         if (sessionFinished) return
+        endPreparationPreview()
         sessionFinished = true
         // Late callbacks from a closed/timed-out recorder must not alter a later session.
         recordingToken++
