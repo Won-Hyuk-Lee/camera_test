@@ -152,7 +152,7 @@ class RecordingHistoryFragment : Fragment() {
         }
     }
     private fun audioSummary(audio: org.json.JSONObject?): String {
-        if (audio == null) return "소리 진단: 이전 버전 기록 없음"
+        if (audio == null) return "소리 진단: 수집된 기록 없음"
         if (!audio.optBoolean("enabled")) return "소리: 마이크 끔"
         if (!audio.optBoolean("hadIssues")) return "소리: 녹음 오류 신호 없음 · 실제 소리 내용은 미검사"
         val intervals = audio.optJSONArray("intervals") ?: JSONArray()
