@@ -124,7 +124,8 @@ class RecordingSettingsFragment : Fragment(), EntryLockListener {
             setBackgroundColor(android.graphics.Color.BLACK)
             contentDescription = "저장 전 촬영 설정 미리보기"
         }
-        previewColumn.addView(previewView, if (landscape) LinearLayout.LayoutParams(-1, 0, 1f) else LinearLayout.LayoutParams(-1, dp(150)))
+        val portraitPreviewHeight = (resources.configuration.screenHeightDp * .32f).toInt().coerceIn(220, 300)
+        previewColumn.addView(previewView, if (landscape) LinearLayout.LayoutParams(-1, 0, 1f) else LinearLayout.LayoutParams(-1, dp(portraitPreviewHeight)))
         previewStatus = TextView(ctx).apply {
             textSize = 12f; setTextColor(android.graphics.Color.LTGRAY)
             maxLines = 2; ellipsize = android.text.TextUtils.TruncateAt.END
